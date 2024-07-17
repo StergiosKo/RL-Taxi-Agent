@@ -499,9 +499,10 @@ def save_grids_as_images(grids, folder_path):
 
 
 class GridViewer:
-    def __init__(self, master, image_paths):
+    def __init__(self, master, image_paths, q_values_list):
         self.master = master
         self.image_paths = image_paths
+        self.q_values_list = q_values_list
         self.index = 0
 
         self.label = Label(master)
@@ -509,6 +510,9 @@ class GridViewer:
 
         self.info_label = Label(master, text="")
         self.info_label.pack()
+
+        self.q_values_label = Label(master, text="", justify=tk.LEFT, wraplength=400)
+        self.q_values_label.pack()
 
         self.prev_button = Button(master, text="Prev", command=self.prev_image)
         self.prev_button.pack(side="left")
@@ -518,12 +522,24 @@ class GridViewer:
 
         self.update_image()
 
+        # Bind arrow keys for navigation
+        self.master.bind('<Left>', lambda event: self.prev_image())
+        self.master.bind('<Right>', lambda event: self.next_image())
+
     def update_image(self):
         img_path = self.image_paths[self.index]
         img = Image.open(img_path)
         self.img_tk = ImageTk.PhotoImage(img)
         self.label.config(image=self.img_tk)
         self.info_label.config(text=f"Move {self.index + 1} out of {len(self.image_paths)}")
+
+        # Use the beautify function if not the last image
+        if self.index < len(self.image_paths) - 1:
+            q_values_text = beautify_q_values(self.q_values_list[self.index])
+        else:
+            q_values_text = "No Q-values available for this state."
+
+        self.q_values_label.config(text=q_values_text)
 
         self.prev_button.config(state=tk.NORMAL if self.index > 0 else tk.DISABLED)
         self.next_button.config(state=tk.NORMAL if self.index < len(self.image_paths) - 1 else tk.DISABLED)
@@ -540,6 +556,24 @@ class GridViewer:
 
 
 
+    
+def beautify_q_values(q_values):
+    # Define arrow symbols for directions
+    arrows = {
+        'up': '↑',
+        'right': '→',
+        'down': '↓',
+        'left': '←'
+    }
+
+    # Format each Q-value to two decimal places and replace text with arrows
+    formatted_q_values = ', '.join(f"{arrows[key]}: {value:.2f}" for key, value in q_values.items())
+    return formatted_q_values
+
+
+
+
+
 
 # Running
 
@@ -549,9 +583,6 @@ class GridViewer:
 
 # Pickle file for Q1
 agent1_save = "Agent1.pickle"
-
-# Pickle file for Q2
-agent2_save = "Agent2.pickle"
 
 # Define constants
 MAX_MOVES = 50
@@ -591,8 +622,20 @@ MAPS_BASE = [MAP_4]
 # taxiPlayer.play(MAP_4)
 
 # Training
-taxi1 = TaxiAgent()  # RL Agent
+
+# Load pickle if it exists
+if os.path.exists(agent1_save):
+    with open(agent1_save, 'rb') as f:
+        qTable = pickle.load(f)
+else:
+    qTable = {}
+
+taxi1 = TaxiAgent(qTable)  # RL Agent
 taxi1.train_agent(MAPS_BASE[0], NUM_EPISODES)
+
+# Save qTable
+with open(agent1_save, 'wb') as f:
+    pickle.dump(taxi1.qtable, f)
 
 
 TEST_EPISODES = 1
@@ -600,14 +643,14 @@ rewards, grids = taxi1.run_map(MAPS_BASE[0], training=False, storeResults=True)
 moves = taxi1.current_turn
 
 # For each grid, get Q-Values of the agent
+qValues = []
 for i in range(len(grids)):
-    print_grid(grids[i])
+    # print_grid(grids[i])
     state = grid_qtable(grids[i])
-    # Get agent's Q-Values
     try:
-        print(taxi1.qtable[state])
+        qValues.append(taxi1.qtable[state])
     except:
-        print("")
+        print(qValues.append("Goal Reached"))
 
 print("Moves: " + str(moves))
 
@@ -620,5 +663,5 @@ image_paths = save_grids_as_images(grids, folder_path)
 # Initialize the GUI
 root = tk.Tk()
 root.title("Grid Viewer")
-app = GridViewer(root, image_paths)
+app = GridViewer(root, image_paths, qValues)
 root.mainloop()
