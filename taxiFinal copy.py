@@ -100,7 +100,7 @@ class TaxiDriver:
 
 class TaxiAgent(TaxiDriver):
 
-    def __init__(self, qtable={}, reward_type='delayed', exploration='greedy', limitQ = True, state_type = 'alt', initial_epsilon=0.1, 
+    def __init__(self, qtable={}, reward_type='delayed', exploration='greedy', limitQ = True, state_type = 'alt', initial_epsilon=0.3, 
                  initial_learning_rate=0.1, min_learning_rate=0.001, learning_rate_decay=0.99995):
         super().__init__()
         self.transitions = []
@@ -145,10 +145,10 @@ class TaxiAgent(TaxiDriver):
         cumulative_reward = final_reward
 
         # Iterate through the transitions in reverse order
-        for state, action in (self.transitions):
+        for state, action in reversed(self.transitions):
             currentAction = action
             current_q_value = self.qtable[state][action]
-            new_q_value = current_q_value + self.learning_rate * (cumulative_reward - current_q_value)
+            new_q_value = (1 - self.learning_rate) * current_q_value + self.learning_rate * cumulative_reward
             self.update_q_values(state, currentAction, new_q_value)
             cumulative_reward = DISCOUNT_FACTOR * cumulative_reward
 
@@ -158,16 +158,52 @@ class TaxiAgent(TaxiDriver):
     def update_q_values(self, state, current_action, q_value):
         if (self.limitQ):
             q_value = max(MIN_Q_VALUE, min(q_value, MAX_Q_VALUE))
+        
+        # if (q_value >= HARD_LIMIT): q_value = HARD_LIMIT
+        # try:
+        #     self.qtable[state][current_action] = q_value
+        # except:
+        #     self.qtable[state] = {a: 0 for a in ACTIONS}
+        #     self.qtable[state][current_action] = q_value
+
+
+
+        # if (q_value <= 1):
+        #     if not find_pos_of_value(self.grid, 'G'):
+        #         print("here current episode: ", self.episode)
+        #         print_grid(self.grid)
+        #         print(f"Turn: {self.current_turn}, New QValue: {q_value}, Old QValue: {self.qtable[state][current_action]}, Action: {current_action}")
+        #         print("current state")
+        #         print(state)
+        #         print("First transition state")
+        #         print(self.transitions[0][0])
+        #         print("Last transition state")
+        #         print(self.transitions[-1][0])
+        #         exit(1)
+
+        #         return
+        
+        # if state == self.transitions[0][0]:
+        #     if self.current_turn >= MAX_MOVES:
+        #         print("here current episode: ", self.episode)
+        #         print_grid(self.grid)
+        #         print(f"Turn: {self.current_turn}, New QValue: {q_value}, Old QValue: {self.qtable[state][current_action]}, Action: {current_action}")
+        #         # print("current state")
+        #         # print(state)
+        #         print("First transition state")
+        #         print(self.qtable[self.transitions[0][0]])
+        #         # print("Last transition state")
+        #         # print(self.transitions[-1][0])
+        #         # print(self.qtable[self.transitions[-1][0]])
+        #         # exit(1)
         try:
             self.qtable[state][current_action] = q_value
         except:
             self.qtable[state] = {a: 0 for a in ACTIONS}
             self.qtable[state][current_action] = q_value
-        
-
         if (self.limitQ):
             # Ensure not all actions of this state have the max value
-            max_actions = [action for action, value in self.qtable[state].items() if value == MAX_Q_VALUE]
+            max_actions = [action for action, value in self.qtable[state].items() if value >= MAX_Q_VALUE]
 
             # If 1 action has the max value, then subtract the learning rate of all the other actions
             # If 2 or more actions have the max value, then subtract the learning rate of these actions except the current action
@@ -181,7 +217,7 @@ class TaxiAgent(TaxiDriver):
                         self.qtable[state][action] -= self.learning_rate * 0.1
             
             # Do the same for min values
-            min_actions = [action for action, value in self.qtable[state].items() if value == MIN_Q_VALUE]
+            min_actions = [action for action, value in self.qtable[state].items() if value <= MIN_Q_VALUE]
             if len(min_actions) == 1:
                 for action in self.qtable[state]:
                     if action != current_action:
@@ -205,12 +241,12 @@ class TaxiAgent(TaxiDriver):
         agent_pos = find_pos_of_value(current_grid, 'T')
         
         if not goal_pos:
-            reward += 100  # Immediate reward for reaching the goal
+            reward += 10  # Immediate reward for reaching the goal
             return reward  # Return immediately since the goal was reached
         
         # Punish agent if it stayed in the same place
         if current_grid == previous_grid:
-            reward -= 1  # Small penalty for not moving
+            reward -= 0.1  # Penalty for not moving
         
         # Calculate the Manhattan distance to the goal
         if goal_pos:
@@ -219,10 +255,10 @@ class TaxiAgent(TaxiDriver):
             current_distance = abs(goal_pos[0] - agent_pos[0]) + abs(goal_pos[1] - agent_pos[1])
             
             # Reward for moving closer to the goal
-            if current_distance > previous_distance:
+            if current_distance < previous_distance:
                 reward += 0.1
             else:
-                reward -= 0.5
+                reward -= 0.05
         
         return reward
 
@@ -233,16 +269,19 @@ class TaxiAgent(TaxiDriver):
 
         # If goal is not on the grid, add +20 to the reward
         if not goal_exists:
-            reward += 100
-            reward += (MAX_MOVES - self.current_turn)/MAX_MOVES
+            reward += 10
+            reward += (MAX_MOVES - self.current_turn) ** 2/1000
         
-        # Punish agent if it stayed in the same place\
+        # Punish agent if it stayed in the same place
         last_state = ''
+        prev_last_state = ''
         for i, transition in enumerate(self.transitions):
             state = transition[0]
-            if state == last_state:
-                reward -= 1/MAX_MOVES
-
+            if i > 0: last_state = self.transitions[i-1][0]
+            if i > 1: prev_last_state = self.transitions[i-2][0]
+            if state == last_state or state == prev_last_state:
+                reward -= 0.0001
+            
         
         # If goal exists give reward based on distance (closer is better)
         if goal_exists:
@@ -250,7 +289,11 @@ class TaxiAgent(TaxiDriver):
             agent_pos = find_pos_of_value(grid, 'T')
             distance = abs(goal_pos[0] - agent_pos[0]) + abs(goal_pos[1] - agent_pos[1])
             # reward += (len(grid)*2 - distance) * math.sqrt(len(grid))
-            reward += ((len(grid)*2 - distance) * 5)/MAX_MOVES
+            reward += ((len(grid)*2 - distance)*4/10)
+
+            # If max turnes has passed
+            if self.current_turn >= MAX_MOVES:
+                reward -= 0.01
 
         # Subtract the number of turns taken by the agent
         # reward -= self.current_turn/MAX_MOVES
@@ -313,9 +356,6 @@ class TaxiAgent(TaxiDriver):
             old_state_reward = self.qtable[old_state][self.currentaction]
         except:
             old_state_reward = 0
-            self.qtable[old_state] = {a: 0 for a in ACTIONS}
-            print("Error on old state")
-            print_grid(last_grid)
         new_state = grid_qtable_alt(current_grid)
         try:
             # Get max reward of new state
@@ -362,7 +402,7 @@ class TaxiAgent(TaxiDriver):
                 grids.append(copy.deepcopy(current_grid))
 
             if self.reward_type == 'immediate':
-                action_reward = self.calculate_immediate_reward(last_grid, current_grid)
+                action_reward = self.calculate_immediate_reward(current_grid, last_grid)
                 sum_immediate_reward += action_reward
                 # print(f"Last Grid:")
                 # print_grid(last_grid)
@@ -377,8 +417,11 @@ class TaxiAgent(TaxiDriver):
 
         if self.reward_type == 'delayed':
             final_reward = self.calculate_final_reward(current_grid)
+            # print(f"Final Reward: {final_reward}")
         elif self.reward_type == 'immediate':
             final_reward = sum_immediate_reward /  self.current_turn
+            final_reward = sum_immediate_reward
+            # print(f"Final Reward: {sum_immediate_reward}")
         
         if training and self.reward_type == 'delayed':
             self.calculate_discounted_rewards_and_update_q_table(final_reward)
@@ -386,10 +429,11 @@ class TaxiAgent(TaxiDriver):
         if training and self.reward_type == 'immediate' and result:
             state = grid_qtable_alt(current_grid)
             try:
-                self.update_q_values(state, self.currentaction, self.qtable[state][self.currentaction] + 10)
+                self.update_q_values(state, self.currentaction, self.qtable[state][self.currentaction] + 10 * DISCOUNT_FACTOR + ((MAX_MOVES - self.current_turn)**2)/1000 * DISCOUNT_FACTOR)
             except:
                 self.qtable[state] = {a: 0 for a in ACTIONS}
-                self.update_q_values(state, self.currentaction, self.qtable[state][self.currentaction] + 10)
+                self.update_q_values(state, self.currentaction, 10 * DISCOUNT_FACTOR)
+            final_reward += 10 + ((MAX_MOVES - self.current_turn)**2)/1000
 
         if storeResults:
             return final_reward, grids, current_grid
@@ -403,10 +447,6 @@ class TaxiAgent(TaxiDriver):
         best_reward = float('-inf')
         average_reward = []
         average_moves = []
-
-        # Difference from A*
-        path = find_path(map)
-        a_moves = len(path) - 1
 
         episodesPerTest = num_episodes/100
 
@@ -425,12 +465,6 @@ class TaxiAgent(TaxiDriver):
             if len(average_moves) > episodesPerTest:
                 average_moves.pop(0)
 
-            avg_reward_value = sum(average_reward) / len(average_reward)
-            avg_reward_value = round(avg_reward_value, 1)
-
-            avg_moves = sum(average_moves) / len(average_moves)
-            avg_moves = round(avg_moves, 1)
-
             isBetter = False
 
             if final_reward > best_reward:
@@ -440,7 +474,7 @@ class TaxiAgent(TaxiDriver):
                 isBetter = True
 
                 # self.learning_rate = min(self.initial_learning_rate, self.learning_rate + self.learning_rate * (final_reward - best_reward) / 100)
-                self.learning_rate = self.initial_learning_rate
+                # self.learning_rate = self.initial_learning_rate
 
                 best_reward = final_reward
             
@@ -448,13 +482,19 @@ class TaxiAgent(TaxiDriver):
                 print(f"Episode: {episode}, Moves = {self.current_turn}, Final Reward = {final_reward}, Epsilon = {self.epsilon}, Learning Rate = {self.learning_rate}")
 
             if episode % episodesPerTest == 0:
+
+                avg_reward_value = sum(average_reward) / len(average_reward)
+                avg_reward_value = round(avg_reward_value, 1)
+
+                avg_moves = sum(average_moves) / len(average_moves)
+                avg_moves = round(avg_moves, 1)
                 
                 # Add df row
                 # df = pd.concat([df, pd.DataFrame({'episode': [episode], 'avg_rewards': [avg_reward_value], 'test_rewards': [test_rewards], 'test_moves': [test_moves], 'difError': [difError], 'movesToGoal': [movesToGoal]})])
                 df.loc[len(df.index)] = [episode, avg_reward_value, avg_moves]
                 # display(df)
 
-                print(f"Epoch: {episode}, moves: {self.current_turn}")
+                print(f"Epoch: {episode}, average moves: {avg_moves}, average reward: {avg_reward_value}")
 
         return df
 
@@ -850,62 +890,41 @@ def plot_avg_metric(df, metric, window, label, color, log=False):
 
     plt.plot(episodes, average_y, color=color, label=label)
 
-# Running
-
-
-# Pickle file for Q1
-agent1_save = "AgentDirectional.pickle"
-
-# Agents (with directional/quadrant state and limit/no limit Q-table)
-agent_dir_limit_save = "AgentDirectional_Limit.pickle"
-agent_dir_no_limit_save = "AgentDirectional_NoLimit.pickle"
-
-# Define constants
-MAX_MOVES = 100
-NUM_EPISODES = 1000
-DISCOUNT_FACTOR = 0.99
-MAX_Q_VALUE = 250
-MIN_Q_VALUE = -1
-ACTIONS = ['up', 'right', 'down', 'left']
-
-# Graph constants
-GROUP_BY = int(NUM_EPISODES/5)
-
 # Maps
 
 MAP_1 = [
     ['1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1'],
-    ['1', '0', '0', '0', '0', '0', '1', '0', '0', '0', '1', '0', '0', 'G', '1'],
-    ['1', '0', '0', '1', '0', '0', '0', '0', '1', '0', '0', '0', '1', '0', '1'],
-    ['1', '0', '0', '1', '0', '0', '1', '1', '1', '1', '1', '1', '1', '0', '1'],
-    ['1', '0', '0', '1', '0', '0', '0', '0', '0', '0', '0', '0', '1', '0', '1'],
-    ['1', '0', '0', '1', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0', '1'],
+    ['1', '0', '0', '0', '0', '1', '0', '0', '0', '0', '1', '0', '0', 'G', '1'],
+    ['1', '0', '0', '0', '0', '0', '0', '0', '1', '0', '0', '0', '1', '0', '1'],
+    ['1', '1', '1', '0', '0', '1', '1', '1', '1', '1', '1', '1', '1', '0', '1'],
+    ['1', '1', '0', '0', '0', '1', '0', '0', '0', '0', '0', '0', '1', '0', '1'],
+    ['1', '0', '0', '0', '0', '1', '0', '0', '0', '0', '0', '0', '0', '0', '1'],
     ['1', '0', '0', '0', '0', '0', '0', '0', '0', '1', '0', '0', '0', '0', '1'],
     ['1', '0', '0', '0', '0', '0', '0', '0', '0', '1', '0', '0', '0', '0', '1'],
-    ['1', '0', '0', '0', '0', '0', '0', '0', '0', '1', '1', '0', '0', '0', '1'],
-    ['1', '1', '1', '1', '0', '0', '0', '0', '0', '0', '1', '1', '0', '0', '1'],
-    ['1', '0', '0', '1', '0', '0', '0', '0', '0', '0', '0', '1', '0', '0', '1'],
-    ['1', '0', '0', '1', '1', '1', '0', '0', '0', '0', '0', '1', '1', '0', '1'],
-    ['1', '0', '0', '0', 'T', '0', '0', '0', '0', '0', '0', '0', '1', '1', '1'],
-    ['1', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0', '1'],
+    ['1', '0', '0', '0', '0', '0', '0', '0', '0', '1', '0', '0', '0', '0', '1'],
+    ['1', '1', '1', '1', '0', '0', '0', '0', '0', '1', '1', '0', '0', '0', '1'],
+    ['1', '0', '0', '1', '0', '0', '0', '0', '0', '0', '1', '0', '0', '0', '1'],
+    ['1', '0', '0', '1', '1', '1', '0', '0', '0', '1', '1', '0', '0', '0', '1'],
+    ['1', '0', '0', '0', 'T', '0', '0', '0', '0', '0', '1', '0', '0', '0', '1'],
+    ['1', '0', '0', '0', '0', '0', '0', '0', '0', '0', '1', '1', '0', '0', '1'],
     ['1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1']
 ]
 
 MAP_1_ADVANCED = [
     ['1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1'],
-    ['1', '0', '0', '0', '0', '0', '1', '0', '0', '0', '1', '0', '0', 'G', '1'],
-    ['1', '0', '0', '1', '0', '0', '0', '0', '1', '0', '0', '0', '1', '0', '1'],
-    ['1', '0', '0', '1', '0', '0', '1', '1', '1', '1', '1', '1', '1', '0', '1'],
-    ['1', '0', '0', '1', '0', '0', '0', '0', '0', '0', '0', '0', '1', '0', '1'],
-    ['1', '0', '0', '1', '0', '0', '1', '0', '0', '0', '0', '0', '1', '0', '1'],
-    ['1', '0', '0', '0', '0', '0', '1', '0', '0', '1', '0', '0', '1', '0', '1'],
-    ['1', '0', '0', '0', '0', '0', '1', '0', '0', '1', '0', '0', '1', '0', '1'],
-    ['1', '0', '0', '0', '0', '0', '1', '0', '0', '1', '1', '0', '0', '0', '1'],
-    ['1', '1', '1', '1', '0', '0', '0', '0', '0', '0', '1', '1', '0', '0', '1'],
-    ['1', '0', '0', '1', '0', '0', '0', '0', '0', '0', '0', '1', '0', '0', '1'],
-    ['1', '0', '0', '1', '1', '1', '0', '0', '0', '0', '0', '1', '1', '0', '1'],
-    ['1', '0', '0', '0', 'T', '0', '0', '0', '0', '0', '0', '0', '1', '1', '1'],
-    ['1', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0', '1'],
+    ['1', '0', '0', '0', '0', '1', '0', '0', '0', '0', '1', '0', '0', 'G', '1'],
+    ['1', '0', '0', '0', '0', '0', '0', '0', '1', '0', '0', '0', '1', '0', '1'],
+    ['1', '1', '1', '0', '0', '1', '1', '1', '1', '1', '1', '1', '1', '0', '1'],
+    ['1', '1', '0', '0', '0', '1', '0', '0', '0', '0', '0', '0', '1', '0', '1'],
+    ['1', '0', '0', '0', '0', '1', '0', '0', '0', '0', '0', '0', '1', '0', '1'],
+    ['1', '0', '0', '0', '0', '0', '0', '0', '0', '1', '0', '0', '1', '0', '1'],
+    ['1', '0', '0', '0', '0', '0', '0', '0', '0', '1', '0', '0', '1', '0', '1'],
+    ['1', '0', '0', '0', '0', '0', '0', '0', '0', '1', '0', '0', '1', '0', '1'],
+    ['1', '1', '1', '1', '0', '0', '0', '0', '0', '1', '1', '0', '1', '0', '1'],
+    ['1', '0', '0', '1', '0', '0', '0', '0', '0', '0', '1', '0', '1', '0', '1'],
+    ['1', '0', '0', '1', '1', '1', '0', '0', '0', '1', '1', '0', '0', '0', '1'],
+    ['1', '0', '0', '0', 'T', '0', '0', '0', '0', '0', '1', '0', '0', '0', '1'],
+    ['1', '0', '0', '0', '0', '0', '0', '0', '0', '0', '1', '1', '0', '0', '1'],
     ['1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1']
 ]
 
@@ -929,16 +948,16 @@ MAP_2 = [
 
 MAP_2 = [
     ['1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1'],
-    ['1', '0', '0', '0', '0', '0', '1', '0', '0', '0', '1', '0', '0', '0', '1'],
-    ['1', '0', '0', '1', '1', '0', '0', '0', '1', '0', '0', '0', '1', '0', '1'],
-    ['1', '0', '0', '1', '0', '0', '0', '1', '1', '1', '1', '1', '1', '0', '1'],
+    ['1', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0', '1'],
+    ['1', '0', '0', '0', '0', '0', '0', '0', '0', '1', '0', '0', '0', '0', '1'],
+    ['1', '0', '0', '1', '1', '0', '0', '0', '1', '1', '1', '1', '1', '0', '1'],
     ['1', '0', '0', '1', '0', '0', '0', '0', '0', '0', '0', '0', '1', '0', '1'],
     ['1', '0', '0', '1', '1', '0', '0', '0', '0', '0', '0', '0', '1', '0', '1'],
     ['1', '0', '0', '0', '1', '1', '0', '0', '1', '1', '0', '0', '1', '0', '1'],
     ['1', '0', '0', '0', '0', '0', '0', '0', '0', '1', '0', '0', '1', '0', '1'],
     ['1', '0', '0', '0', '0', '0', '0', '0', '0', '1', '0', '0', '1', '0', '1'],
-    ['1', '1', '1', '1', '0', '0', '0', '0', '0', '1', '1', '0', '0', '0', '1'],
-    ['1', 'G', '0', '1', '0', '0', '0', '0', '0', '0', '1', '0', '0', '0', '1'],
+    ['1', '1', '1', '1', '0', '0', '0', '0', '0', '1', '0', '0', '0', '0', '1'],
+    ['1', 'G', '0', '1', '0', '0', '0', '0', '0', '1', '1', '0', '0', '0', '1'],
     ['1', '0', '0', '1', '1', '0', '0', '0', '0', '0', '1', '1', '1', '0', '1'],
     ['1', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0', '1', '0', '1'],
     ['1', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0', '1', 'T', '1'],
@@ -947,24 +966,54 @@ MAP_2 = [
 
 MAP_2_ADVANCED = [
     ['1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1'],
-    ['1', '0', '0', '0', '0', '0', '1', '0', '0', '0', '1', '0', '0', '0', '1'],
-    ['1', '0', '0', '1', '1', '0', '0', '0', '1', '0', '0', '0', '1', '0', '1'],
-    ['1', '0', '0', '1', '0', '0', '0', '1', '1', '1', '1', '1', '1', '0', '1'],
+    ['1', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0', '1'],
+    ['1', '0', '0', '0', '0', '0', '0', '0', '0', '1', '0', '0', '0', '0', '1'],
+    ['1', '0', '0', '1', '1', '0', '0', '0', '1', '1', '1', '1', '1', '0', '1'],
     ['1', '0', '0', '1', '0', '0', '0', '0', '0', '0', '0', '0', '1', '0', '1'],
     ['1', '0', '0', '1', '1', '0', '0', '0', '0', '0', '0', '0', '1', '0', '1'],
     ['1', '0', '0', '0', '1', '1', '1', '1', '1', '1', '0', '0', '1', '0', '1'],
     ['1', '0', '0', '0', '0', '0', '0', '0', '0', '1', '0', '0', '1', '0', '1'],
     ['1', '0', '0', '0', '0', '0', '0', '0', '0', '1', '0', '0', '1', '0', '1'],
-    ['1', '1', '1', '1', '0', '0', '0', '0', '0', '1', '1', '0', '0', '0', '1'],
-    ['1', 'G', '0', '1', '0', '0', '0', '0', '0', '0', '1', '0', '0', '0', '1'],
+    ['1', '1', '1', '1', '0', '0', '0', '0', '0', '1', '0', '0', '0', '0', '1'],
+    ['1', 'G', '0', '1', '0', '0', '0', '0', '0', '1', '1', '0', '0', '0', '1'],
     ['1', '0', '0', '1', '1', '0', '0', '0', '0', '0', '1', '1', '1', '0', '1'],
     ['1', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0', '1', '0', '1'],
     ['1', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0', '1', 'T', '1'],
     ['1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1']
 ]
 
+MAP_3 = [
+    ['1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1'],
+    ['1', '0', '0', '0', '0', '0', '1', '0', '0', '0', '0', '0', '0', '0', '1'],
+    ['1', '0', '0', '1', '1', '0', '0', '0', '1', '0', '0', '0', '1', '1', '1'],
+    ['1', '0', '1', '1', '0', '0', '0', '0', '1', '1', '1', '1', '1', '0', '1'],
+    ['1', '0', '0', '1', '0', '0', '0', '0', '1', '0', '0', '0', '1', '0', '1'],
+    ['1', '0', '0', '1', '1', '0', '0', '0', '1', 'G', '0', '0', '1', '0', '1'],
+    ['1', '0', 'T', '0', '0', '0', '0', '0', '1', '1', '0', '0', '1', '0', '1'],
+    ['1', '0', '0', '0', '0', '0', '0', '0', '0', '1', '0', '0', '1', '0', '1'],
+    ['1', '0', '0', '0', '0', '0', '0', '0', '0', '1', '0', '0', '1', '0', '1'],
+    ['1', '1', '1', '1', '0', '0', '0', '0', '0', '1', '0', '0', '0', '0', '1'],
+    ['1', '0', '0', '1', '0', '0', '0', '0', '0', '1', '1', '0', '0', '0', '1'],
+    ['1', '0', '0', '1', '1', '0', '0', '0', '0', '0', '1', '1', '1', '0', '1'],
+    ['1', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0', '1', '0', '0', '1'],
+    ['1', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0', '1'],
+    ['1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1']
+]
+
 
 MAPS_BASE = [MAP_1, MAP_1_ADVANCED, MAP_2, MAP_2_ADVANCED]
+
+# Define constants
+MAX_MOVES = 300
+NUM_EPISODES = 70000
+DISCOUNT_FACTOR = 0.99
+MAX_Q_VALUE = 200
+MIN_Q_VALUE = -1
+ACTIONS = ['up', 'right', 'down', 'left']
+HARD_LIMIT = 10000
+
+# Graph constants
+GROUP_BY = int(NUM_EPISODES/5)
 
 
 # Create agents
@@ -1003,29 +1052,25 @@ agent_delay_greedy_limit = TaxiAgent(agent8QTable, reward_type='delayed', explor
 
 # Training
 train_df_agent1 = train_agent(agent_imm_softmax_nolimit, MAPS_BASE[0], 'ImmediateSoftmaxNoLimit')
-# train_df_agent2 = train_agent(agent_delay_softmax_nolimit, MAPS_BASE[0], 'DelaySoftmaxNoLimit')
-
-# train_df_agent3 = train_agent(agent_imm_softmax_limit, MAPS_BASE[0], 'ImmediateSoftmaxLimit')
-# # train_df_agent4 = train_agent(agent_delay_softmax_limit, MAPS_BASE[0], 'DelaySoftmaxLimit')
-
+train_df_agent3 = train_agent(agent_imm_softmax_limit, MAPS_BASE[0], 'ImmediateSoftmaxLimit')
 # train_df_agent5 = train_agent(agent_imm_greedy_nolimit, MAPS_BASE[0], 'ImmediateGreedyNoLimit')
-# # train_df_agent6 = train_agent(agent_delay_greedy_nolimit, MAPS_BASE[0], 'DelayGreedyNoLimit')
-
 # train_df_agent7 = train_agent(agent_imm_greedy_limit, MAPS_BASE[0], 'ImmediateGreedyLimit')
-# # train_df_agent8 = train_agent(agent_delay_greedy_limit, MAPS_BASE[0], 'DelayGreedyLimit')
+
+# train_df_agent2 = train_agent(agent_delay_softmax_nolimit, MAPS_BASE[0], 'DelaySoftmaxNoLimit')
+# train_df_agent4 = train_agent(agent_delay_softmax_limit, MAPS_BASE[0], 'DelaySoftmaxLimit')
+# train_df_agent6 = train_agent(agent_delay_greedy_nolimit, MAPS_BASE[0], 'DelayGreedyNoLimit')
+# train_df_agent8 = train_agent(agent_delay_greedy_limit, MAPS_BASE[0], 'DelayGreedyLimit')
 
 # Save Q-Tables
 save_Q_table(agent_imm_softmax_nolimit, 'ImmediateSoftmaxNoLimit1.pickle')
-save_Q_table(agent_delay_softmax_nolimit, 'DelaySoftmaxNoLimit1.pickle')
-
 save_Q_table(agent_imm_softmax_limit, 'ImmediateSoftmaxLimit1.pickle')
-save_Q_table(agent_delay_softmax_limit, 'DelaySoftmaxLimit1.pickle')
+# save_Q_table(agent_imm_greedy_nolimit, 'ImmediateGreedyNoLimit1.pickle')
+# save_Q_table(agent_imm_greedy_limit, 'ImmediateGreedyLimit1.pickle')
 
-save_Q_table(agent_imm_greedy_nolimit, 'ImmediateGreedyNoLimit1.pickle')
-save_Q_table(agent_delay_greedy_nolimit, 'DelayGreedyNoLimit1.pickle')
-
-save_Q_table(agent_imm_greedy_limit, 'ImmediateGreedyLimit1.pickle')
-save_Q_table(agent_delay_greedy_limit, 'DelayGreedyLimit1.pickle')
+# save_Q_table(agent_delay_softmax_nolimit, 'DelaySoftmaxNoLimit11v.pickle')
+# save_Q_table(agent_delay_softmax_limit, 'DelaySoftmaxLimit11v.pickle')
+# save_Q_table(agent_delay_greedy_nolimit, 'DelayGreedyNoLimit11v.pickle')
+# save_Q_table(agent_delay_greedy_limit, 'DelayGreedyLimit11v.pickle')
 
 
 # rewards, grids, _ = agent_delay_softmax_nolimit.run_map(MAPS_BASE[0], training=False, storeResults=True)
@@ -1034,18 +1079,42 @@ save_Q_table(agent_delay_greedy_limit, 'DelayGreedyLimit1.pickle')
 # Training 2
 #train_df_low = train_agent(agent_immediate_softmax_lowLearning, MAPS_BASE[0], 'Agent Directional with Low Learning Rate')
 
+# Immediate reward agents
+train_df_agent1.to_csv('train_df_agent_ImmediateSoftmaxNoLimit1_1.csv')
+train_df_agent3.to_csv('train_df_agent_ImmediateSoftmaxLimit1.csv')
+# train_df_agent5.to_csv('train_df_agent_ImmediateGreedyNoLimit1.csv')
+# train_df_agent7.to_csv('train_df_agent_ImmediateGreedyLimit1.csv')
+
+# # Greedy reward agents
+# # train_df_agent2.to_csv('train_df_agent_DelaySoftmaxNoLimit1_1.csv')
+# # train_df_agent4.to_csv('train_df_agent_DelaySoftmaxLimit1_1.csv')
+# # train_df_agent6.to_csv('train_df_agent_DelayGreedyNoLimit1_1.csv')
+# # train_df_agent8.to_csv('train_df_agent_DelayGreedyLimit1_1.csv')
+
 # # Compare results with plots
 # window = 5
 # plt.figure(figsize=(10, 5))
-# plot_avg_metric(train_df_agent1, 'avg_moves', window, 'ImmediateSoftmaxNoLimit', 'red')
+# # plot_avg_metric(train_df_agent1, 'avg_moves', window, 'ImmediateSoftmaxNoLimit', 'red')
 # plot_avg_metric(train_df_agent3, 'avg_moves', window, 'ImmediateSoftmaxLimit', 'green')
-# plot_avg_metric(train_df_agent5, 'avg_moves', window, 'ImmediateGreedyNoLimit', 'cyan')
-# plot_avg_metric(train_df_agent7, 'avg_moves', window, 'ImmediateGreedyLimit', 'black')
+# # plot_avg_metric(train_df_agent5, 'avg_moves', window, 'ImmediateGreedyNoLimit', 'cyan')
+# # plot_avg_metric(train_df_agent7, 'avg_moves', window, 'ImmediateGreedyLimit', 'black')
 # plt.grid(linestyle=':')
 # plt.legend()
 # plt.xlabel('Episodes')
 # plt.ylabel('Average Moves')
 # plt.title('Average Moves Comparison Immediate Reward Agents')
+# plt.show()
+
+# plt.figure(figsize=(10, 5))
+# # plot_avg_metric(train_df_agent1, 'avg_rewards', window, 'ImmediateSoftmaxNoLimit', 'red')
+# plot_avg_metric(train_df_agent3, 'avg_rewards', window, 'ImmediateSoftmaxLimit', 'green')
+# # plot_avg_metric(train_df_agent5, 'avg_rewards', window, 'ImmediateGreedyNoLimit', 'cyan')
+# # plot_avg_metric(train_df_agent7, 'avg_rewards', window, 'ImmediateGreedyLimit', 'black')
+# plt.grid(linestyle=':')
+# plt.legend()
+# plt.xlabel('Episodes')
+# plt.ylabel('Average Rewards')
+# plt.title('Average Rewards Comparison Immediate Reward Agents')
 # plt.show()
 
 # plt.figure(figsize=(10, 5))
@@ -1058,19 +1127,6 @@ save_Q_table(agent_delay_greedy_limit, 'DelayGreedyLimit1.pickle')
 # plt.xlabel('Episodes')
 # plt.ylabel('Average Moves')
 # plt.title('Average Moves Comparison Delayed Reward Agents')
-# plt.show()
-
-
-# plt.figure(figsize=(10, 5))
-# plot_avg_metric(train_df_agent1, 'avg_rewards', window, 'ImmediateSoftmaxNoLimit', 'red')
-# plot_avg_metric(train_df_agent3, 'avg_rewards', window, 'ImmediateSoftmaxLimit', 'green')
-# plot_avg_metric(train_df_agent5, 'avg_rewards', window, 'ImmediateGreedyNoLimit', 'cyan')
-# plot_avg_metric(train_df_agent7, 'avg_rewards', window, 'ImmediateGreedyLimit', 'black')
-# plt.grid(linestyle=':')
-# plt.legend()
-# plt.xlabel('Episodes')
-# plt.ylabel('Average Rewards')
-# plt.title('Average Rewards Comparison Immediate Reward Agents')
 # plt.show()
 
 # plt.figure(figsize=(10, 5))
@@ -1089,26 +1145,26 @@ save_Q_table(agent_delay_greedy_limit, 'DelayGreedyLimit1.pickle')
 rewards, grids, _ = agent_imm_softmax_nolimit.run_map(MAPS_BASE[0], training=False, storeResults=True)
 display_test(agent_imm_softmax_nolimit, rewards, grids, len(grids), 'ImmediateSoftmaxNoLimit')
 
-# rewards, grids, _ = agent_delay_softmax_nolimit.run_map(MAPS_BASE[0], training=False, storeResults=True)
-# display_test(agent_delay_softmax_nolimit, rewards, grids, len(grids), 'DelaySoftmaxNoLimit')
-
 # rewards, grids, _ = agent_imm_greedy_nolimit.run_map(MAPS_BASE[0], training=False, storeResults=True)
 # display_test(agent_imm_greedy_nolimit, rewards, grids, len(grids), 'ImmediateGreedyNoLimit')
 
-# # rewards, grids, _ = agent_delay_greedy_nolimit.run_map(MAPS_BASE[0], training=False, storeResults=True)
-# # display_test(agent_delay_greedy_nolimit, rewards, grids, len(grids), 'DelayGreedyNoLimit')
-
-# rewards, grids, _ = agent_imm_softmax_limit.run_map(MAPS_BASE[0], training=False, storeResults=True)
-# display_test(agent_imm_softmax_limit, rewards, grids, len(grids), 'ImmediateSoftmaxLimit')
-
-# # rewards, grids, _ = agent_delay_softmax_limit.run_map(MAPS_BASE[0], training=False, storeResults=True)
-# # display_test(agent_delay_softmax_limit, rewards, grids, len(grids), 'DelaySoftmaxLimit')
+rewards, grids, _ = agent_imm_softmax_limit.run_map(MAPS_BASE[0], training=False, storeResults=True)
+display_test(agent_imm_softmax_limit, rewards, grids, len(grids), 'ImmediateSoftmaxLimit')
 
 # rewards, grids, _ = agent_imm_greedy_limit.run_map(MAPS_BASE[0], training=False, storeResults=True)
 # display_test(agent_imm_greedy_limit, rewards, grids, len(grids), 'ImmediateGreedyLimit')
 
-# # rewards, grids, _ = agent_delay_greedy_limit.run_map(MAPS_BASE[0], training=False, storeResults=True)
-# # display_test(agent_delay_greedy_limit, rewards, grids, len(grids), 'DelayGreedyLimit')
+# rewards, grids, _ = agent_delay_softmax_nolimit.run_map(MAPS_BASE[3], training=False, storeResults=True)
+# display_test(agent_delay_softmax_nolimit, rewards, grids, len(grids), 'DelaySoftmaxNoLimit')
+
+# rewards, grids, _ = agent_delay_greedy_nolimit.run_map(MAPS_BASE[0], training=False, storeResults=True)
+# display_test(agent_delay_greedy_nolimit, rewards, grids, len(grids), 'DelayGreedyNoLimit')
+
+# rewards, grids, _ = agent_delay_softmax_limit.run_map(MAPS_BASE[0], training=False, storeResults=True)
+# display_test(agent_delay_softmax_limit, rewards, grids, len(grids), 'DelaySoftmaxLimit')
+
+# rewards, grids, _ = agent_delay_greedy_limit.run_map(MAPS_BASE[0], training=False, storeResults=True)
+# display_test(agent_delay_greedy_limit, rewards, grids, len(grids), 'DelayGreedyLimit')
 
 
 # Prevcode
@@ -1202,6 +1258,42 @@ display_test(agent_imm_softmax_nolimit, rewards, grids, len(grids), 'ImmediateSo
 #     ['1', '0', '0', '1', '0', '0', '0', '0', '0', '0', '0', '1', '0', '0', '1'],
 #     ['1', '0', '0', '1', '1', '1', '0', '0', '0', '0', '0', '1', '1', '0', '1'],
 #     ['1', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0', '1', '1', '1'],
+#     ['1', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0', '1'],
+#     ['1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1']
+# ]
+
+# MAP_1 = [
+#     ['1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1'],
+#     ['1', '0', '0', '0', '0', '0', '1', '0', '0', '0', '1', '0', '0', 'G', '1'],
+#     ['1', '0', '0', '1', '0', '0', '0', '0', '1', '0', '0', '0', '1', '0', '1'],
+#     ['1', '0', '0', '1', '0', '0', '1', '1', '1', '1', '1', '1', '1', '0', '1'],
+#     ['1', '0', '0', '1', '0', '0', '0', '0', '0', '0', '0', '0', '1', '0', '1'],
+#     ['1', '0', '0', '1', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0', '1'],
+#     ['1', '0', '0', '0', '0', '0', '0', '0', '0', '1', '0', '0', '0', '0', '1'],
+#     ['1', '0', '0', '0', '0', '0', '0', '0', '0', '1', '0', '0', '0', '0', '1'],
+#     ['1', '0', '0', '0', '0', '0', '0', '0', '0', '1', '1', '0', '0', '0', '1'],
+#     ['1', '1', '1', '1', '0', '0', '0', '0', '0', '0', '1', '1', '0', '0', '1'],
+#     ['1', '0', '0', '1', '0', '0', '0', '0', '0', '0', '0', '1', '0', '0', '1'],
+#     ['1', '0', '0', '1', '1', '1', '0', '0', '0', '0', '0', '1', '1', '0', '1'],
+#     ['1', '0', '0', '0', 'T', '0', '0', '0', '0', '0', '0', '0', '1', '1', '1'],
+#     ['1', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0', '1'],
+#     ['1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1']
+# ]
+
+# MAP_1_ADVANCED = [
+#     ['1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1'],
+#     ['1', '0', '0', '0', '0', '0', '1', '0', '0', '0', '1', '0', '0', 'G', '1'],
+#     ['1', '0', '0', '1', '0', '0', '0', '0', '1', '0', '0', '0', '1', '0', '1'],
+#     ['1', '0', '0', '1', '0', '0', '1', '1', '1', '1', '1', '1', '1', '0', '1'],
+#     ['1', '0', '0', '1', '0', '0', '0', '0', '0', '0', '0', '0', '1', '0', '1'],
+#     ['1', '0', '0', '1', '0', '0', '0', '0', '0', '0', '0', '0', '1', '0', '1'],
+#     ['1', '0', '0', '0', '0', '0', '0', '0', '0', '1', '0', '0', '1', '0', '1'],
+#     ['1', '0', '0', '0', '0', '0', '0', '0', '0', '1', '0', '0', '1', '0', '1'],
+#     ['1', '0', '0', '0', '0', '0', '0', '0', '0', '1', '1', '0', '0', '0', '1'],
+#     ['1', '1', '1', '1', '0', '0', '0', '0', '0', '0', '1', '1', '0', '0', '1'],
+#     ['1', '0', '0', '1', '0', '0', '0', '0', '0', '0', '0', '1', '0', '0', '1'],
+#     ['1', '0', '0', '1', '1', '1', '0', '0', '0', '0', '0', '1', '1', '0', '1'],
+#     ['1', '0', '0', '0', 'T', '0', '0', '0', '0', '0', '0', '0', '1', '1', '1'],
 #     ['1', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0', '1'],
 #     ['1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1']
 # ]
