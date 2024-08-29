@@ -13,7 +13,6 @@ from tkinter import Label, Button
 from heapq import heappop, heappush
 import time
 import pandas as pd
-from IPython.display import display
 
 
 class TaxiDriver:
@@ -80,7 +79,7 @@ class TaxiDriver:
         print_grid(self.grid)
         return True
 
-    def play(self, grid):
+    def play(self, grid, qtable=None):
         current_grid = copy.deepcopy(grid)
 
         # Find taxi position
@@ -94,6 +93,10 @@ class TaxiDriver:
 
         # Taxi decision-making loop
         while not self.goal_finished:
+            if qtable:
+                # Print qvalues
+                state = grid_qtable_alt(current_grid)
+                print(qtable[state])
             result = self.choice()
 
             if not result:
@@ -101,8 +104,8 @@ class TaxiDriver:
 
 class TaxiAgent(TaxiDriver):
 
-    def __init__(self, qtable={}, state_type = 'alt', limitQ = True, initial_epsilon=0.3, 
-                 initial_learning_rate=0.1, min_learning_rate=0.001, learning_rate_decay=0.99995):
+    def __init__(self, qtable={}, reward_type='delayed', exploration='greedy', limitQ = True, state_type = 'alt', initial_epsilon=0.3, 
+                 initial_learning_rate=0.1, min_learning_rate=0.0001, learning_rate_decay=0.99995):
         super().__init__()
         self.transitions = []
         self.episode_rewards = 0
@@ -120,6 +123,10 @@ class TaxiAgent(TaxiDriver):
         self.turns_without_increasing = 0
         self.state_type = state_type
         self.limitQ = limitQ
+        self.reward_type = reward_type
+        self.exploration = exploration
+        self.currentaction = None
+        print(type(qtable))
 
     def restart_round(self, starting_location, grid):
         super().restart_round(starting_location, grid)
@@ -127,7 +134,7 @@ class TaxiAgent(TaxiDriver):
         self.transitions = []
         self.episode += 1
 
-        # Adjust epsilon and learning rate based on performance
+        # Adjust learning rate based on performance
         if self.episode_rewards > self.best_reward:
             self.best_reward = self.episode_rewards
         else:
@@ -142,79 +149,120 @@ class TaxiAgent(TaxiDriver):
         cumulative_reward = final_reward
 
         # Iterate through the transitions in reverse order
-        for state, action in (self.transitions):
+        for state, action in reversed(self.transitions):
             currentAction = action
             current_q_value = self.qtable[state][action]
-            new_q_value = current_q_value + self.learning_rate * (cumulative_reward - current_q_value)
-            # Clip the Q-value within the specified bounds
-            if (self.limitQ):
-                new_q_value = max(MIN_Q_VALUE, min(new_q_value, MAX_Q_VALUE))
-
-            self.qtable[state][action] = new_q_value
+            new_q_value = (1 - self.learning_rate) * current_q_value + self.learning_rate * cumulative_reward
+            self.update_q_values(state, currentAction, new_q_value)
             cumulative_reward = DISCOUNT_FACTOR * cumulative_reward
-
-            if (self.limitQ):
-
-                # Ensure not all actions of this state have the max value
-                max_actions = [action for action, value in self.qtable[state].items() if value == MAX_Q_VALUE]
-
-                # If 1 action has the max value, then subtract the learning rate of all the other actions
-                # If 2 or more actions have the max value, then subtract the learning rate of these actions except the current action
-                if len(max_actions) == 1:
-                    for action in self.qtable[state]:
-                        if action != currentAction:
-                            self.qtable[state][action] -= self.learning_rate
-                elif len(max_actions) > 1:
-                    for action in self.qtable[state]:
-                        if (action != currentAction) and (action not in max_actions):
-                            self.qtable[state][action] -= self.learning_rate * (cumulative_reward - current_q_value)
-                
-                # Do the same for min values
-                min_actions = [action for action, value in self.qtable[state].items() if value == MIN_Q_VALUE]
-                if len(min_actions) == 1:
-                    for action in self.qtable[state]:
-                        if action != currentAction:
-                            self.qtable[state][action] += self.learning_rate
-                elif len(min_actions) > 1:
-                    for action in self.qtable[state]:
-                        if (action != currentAction) and (action not in min_actions):
-                            self.qtable[state][action] += self.learning_rate * (cumulative_reward - current_q_value)
-                
-                # If any action is less than min value, then set it to min value
-                min_actions = [action for action, value in self.qtable[state].items() if value <= MIN_Q_VALUE]
-                if len(min_actions) > 0:
-                    for action in min_actions:
-                        self.qtable[state][action] = MIN_Q_VALUE
 
     def get_q_value(self, state, action):
         return self.qtable.get((state, action), 0)
 
-    def calculate_immediate_reward(self, current_grid, previous_grid, action):
+    def update_q_values(self, state, current_action, q_value):
+        if (self.limitQ):
+            q_value = max(MIN_Q_VALUE, min(q_value, MAX_Q_VALUE))
+        
+        # if (q_value >= HARD_LIMIT): q_value = HARD_LIMIT
+        # try:
+        #     self.qtable[state][current_action] = q_value
+        # except:
+        #     self.qtable[state] = {a: 0 for a in ACTIONS}
+        #     self.qtable[state][current_action] = q_value
+
+
+
+        # if (q_value <= 1):
+        #     if not find_pos_of_value(self.grid, 'G'):
+        #         print("here current episode: ", self.episode)
+        #         print_grid(self.grid)
+        #         print(f"Turn: {self.current_turn}, New QValue: {q_value}, Old QValue: {self.qtable[state][current_action]}, Action: {current_action}")
+        #         print("current state")
+        #         print(state)
+        #         print("First transition state")
+        #         print(self.transitions[0][0])
+        #         print("Last transition state")
+        #         print(self.transitions[-1][0])
+        #         exit(1)
+
+        #         return
+        
+        # if state == self.transitions[0][0]:
+        #     if self.current_turn >= MAX_MOVES:
+        #         print("here current episode: ", self.episode)
+        #         print_grid(self.grid)
+        #         print(f"Turn: {self.current_turn}, New QValue: {q_value}, Old QValue: {self.qtable[state][current_action]}, Action: {current_action}")
+        #         # print("current state")
+        #         # print(state)
+        #         print("First transition state")
+        #         print(self.qtable[self.transitions[0][0]])
+        #         # print("Last transition state")
+        #         # print(self.transitions[-1][0])
+        #         # print(self.qtable[self.transitions[-1][0]])
+        #         # exit(1)
+        try:
+            self.qtable[state][current_action] = q_value
+        except:
+            self.qtable[state] = {a: 0 for a in ACTIONS}
+            self.qtable[state][current_action] = q_value
+        if (self.limitQ):
+            # Ensure not all actions of this state have the max value
+            max_actions = [action for action, value in self.qtable[state].items() if value >= MAX_Q_VALUE]
+
+            # If 1 action has the max value, then subtract the learning rate of all the other actions
+            # If 2 or more actions have the max value, then subtract the learning rate of these actions except the current action
+            if len(max_actions) == 1:
+                for action in self.qtable[state]:
+                    if action != current_action:
+                        self.qtable[state][action] -= self.learning_rate
+            elif len(max_actions) > 1:
+                for action in self.qtable[state]:
+                    if (action != current_action) and (action not in max_actions):
+                        self.qtable[state][action] -= self.learning_rate * 0.1
+            
+            # Do the same for min values
+            min_actions = [action for action, value in self.qtable[state].items() if value <= MIN_Q_VALUE]
+            if len(min_actions) == 1:
+                for action in self.qtable[state]:
+                    if action != current_action:
+                        self.qtable[state][action] += self.learning_rate
+            elif len(min_actions) > 1:
+                for action in self.qtable[state]:
+                    if (action != current_action) and (action not in min_actions):
+                        self.qtable[state][action] += self.learning_rate * 0.1
+            
+            # If any action is less than min value, then set it to min value
+            min_actions = [action for action, value in self.qtable[state].items() if value <= MIN_Q_VALUE]
+            if len(min_actions) > 0:
+                for action in min_actions:
+                    self.qtable[state][action] = MIN_Q_VALUE
+
+    def calculate_immediate_reward(self, current_grid, previous_grid):
         reward = 0
         
         # Check if the agent has reached the goal
         goal_pos = find_pos_of_value(current_grid, 'G')
         agent_pos = find_pos_of_value(current_grid, 'T')
         
-        if goal_pos:
+        if not goal_pos:
             reward += 10  # Immediate reward for reaching the goal
             return reward  # Return immediately since the goal was reached
         
         # Punish agent if it stayed in the same place
         if current_grid == previous_grid:
-            reward -= 1/MAX_MOVES  # Small penalty for not moving
+            reward -= 0.1  # Penalty for not moving
         
         # Calculate the Manhattan distance to the goal
-        if not goal_pos:
+        if goal_pos:
             previous_agent_pos = find_pos_of_value(previous_grid, 'T')
             previous_distance = abs(goal_pos[0] - previous_agent_pos[0]) + abs(goal_pos[1] - previous_agent_pos[1])
             current_distance = abs(goal_pos[0] - agent_pos[0]) + abs(goal_pos[1] - agent_pos[1])
             
             # Reward for moving closer to the goal
             if current_distance < previous_distance:
-                reward += 1/MAX_MOVES  # Small reward for moving closer
+                reward += 0.1
             else:
-                reward -= 1/MAX_MOVES  # Small penalty for moving further away or not improving
+                reward -= 0.05
         
         return reward
 
@@ -226,15 +274,18 @@ class TaxiAgent(TaxiDriver):
         # If goal is not on the grid, add +20 to the reward
         if not goal_exists:
             reward += 10
-            reward += (MAX_MOVES - self.current_turn)/MAX_MOVES
+            reward += (MAX_MOVES - self.current_turn) ** 2/1000
         
-        # Punish agent if it stayed in the same place\
+        # Punish agent if it stayed in the same place
         last_state = ''
+        prev_last_state = ''
         for i, transition in enumerate(self.transitions):
             state = transition[0]
-            if state == last_state:
-                reward -= 1/MAX_MOVES
-
+            if i > 0: last_state = self.transitions[i-1][0]
+            if i > 1: prev_last_state = self.transitions[i-2][0]
+            if state == last_state or state == prev_last_state:
+                reward -= 0.00001
+            
         
         # If goal exists give reward based on distance (closer is better)
         if goal_exists:
@@ -242,10 +293,14 @@ class TaxiAgent(TaxiDriver):
             agent_pos = find_pos_of_value(grid, 'T')
             distance = abs(goal_pos[0] - agent_pos[0]) + abs(goal_pos[1] - agent_pos[1])
             # reward += (len(grid)*2 - distance) * math.sqrt(len(grid))
-            reward += ((len(grid)*2 - distance) * 10)/MAX_MOVES
+            reward += ((len(grid)*2 - distance)*4/10)
+
+            # # If max turnes has passed
+            # if self.current_turn >= MAX_MOVES:
+            #     reward -= 0.01
 
         # Subtract the number of turns taken by the agent
-        reward -= self.current_turn/MAX_MOVES
+        # reward -= self.current_turn/MAX_MOVES
 
         return reward
 
@@ -288,11 +343,31 @@ class TaxiAgent(TaxiDriver):
         # Get the current state based on the agent's position and surroundings
         state = get_state(self.grid, self.state_type)
         # Use the Q-learning agent to choose the best action
-        action = self.get_best_action(state)
+        if self.exploration == 'greedy':
+            action = self.get_best_action(state)
+        elif self.exploration == 'softmax':
+            action = self.get_best_action(state)
         self.store_transition(state, action)
+        self.currentaction = action
         self.move(action)
 
         return True
+    
+    def update_immediate_reward(self, last_grid, current_grid, new_reward):
+        old_state = grid_qtable_alt(last_grid)
+        old_state_reward = 0
+        try:
+            old_state_reward = self.qtable[old_state][self.currentaction]
+        except:
+            old_state_reward = 0
+        new_state = grid_qtable_alt(current_grid)
+        try:
+            # Get max reward of new state
+            max_reward = max(self.qtable[new_state].values())
+        except:
+            max_reward = 0
+        added_reward = old_state_reward + self.learning_rate * (new_reward + DISCOUNT_FACTOR * max_reward - old_state_reward)
+        self.update_q_values(old_state, self.currentaction, added_reward)
 
     def save_Q_TABLE(self, filename='qtable.pkl'):
         with open(filename, 'wb') as f:
@@ -305,6 +380,8 @@ class TaxiAgent(TaxiDriver):
         self.set_training(training)
         current_grid = copy.deepcopy(map)
         movesTaken = 0
+
+        sum_immediate_reward = 0
 
         grids = []
         if storeResults:
@@ -321,18 +398,46 @@ class TaxiAgent(TaxiDriver):
 
         # Taxi decision-making loop
         while not self.goal_finished:
+            last_grid = copy.deepcopy(current_grid)
             result = self.choice()
             movesTaken += 1
+
             if storeResults:
                 grids.append(copy.deepcopy(current_grid))
 
+            if self.reward_type == 'immediate':
+                action_reward = self.calculate_immediate_reward(current_grid, last_grid)
+                sum_immediate_reward += action_reward
+                # print(f"Last Grid:")
+                # print_grid(last_grid)
+                # print(f"Current Grid:")
+                # print_grid(current_grid)
+                # print(f"Action: {self.currentaction}, Reward: {action_reward}, State: {grid_qtable_alt(last_grid)}")
+                self.update_immediate_reward(last_grid, current_grid, action_reward)
+
             if not result:
                 break
+    
 
-        final_reward = self.calculate_final_reward(current_grid)    
+        if self.reward_type == 'delayed':
+            final_reward = self.calculate_final_reward(current_grid)
+            # print(f"Final Reward: {final_reward}")
+        elif self.reward_type == 'immediate':
+            final_reward = sum_immediate_reward /  self.current_turn
+            final_reward = sum_immediate_reward
+            # print(f"Final Reward: {sum_immediate_reward}")
         
-        if training:
+        if training and self.reward_type == 'delayed':
             self.calculate_discounted_rewards_and_update_q_table(final_reward)
+        
+        if training and self.reward_type == 'immediate' and result:
+            state = grid_qtable_alt(current_grid)
+            try:
+                self.update_q_values(state, self.currentaction, self.qtable[state][self.currentaction] + 10 * DISCOUNT_FACTOR + ((MAX_MOVES - self.current_turn)**2)/1000 * DISCOUNT_FACTOR)
+            except:
+                self.qtable[state] = {a: 0 for a in ACTIONS}
+                self.update_q_values(state, self.currentaction, 10 * DISCOUNT_FACTOR)
+            final_reward += 10 + ((MAX_MOVES - self.current_turn)**2)/1000
 
         if storeResults:
             return final_reward, grids, current_grid
@@ -340,18 +445,16 @@ class TaxiAgent(TaxiDriver):
             return final_reward, movesTaken, current_grid
         
     
-    def train_agent(self, map, num_episodes, ep_per_test=500):
+    def train_agent(self, map, num_episodes):
         self.set_training(True)
         print("Starting agent training...")
         best_reward = float('-inf')
         average_reward = []
         average_moves = []
 
-        # Difference from A*
-        path = find_path(map)
-        a_moves = len(path) - 1
+        episodesPerTest = num_episodes/100
 
-        episodesPerTest = ep_per_test
+        print(f"Has limit? {self.limitQ}")
 
         df = init_dataframe()
 
@@ -366,12 +469,6 @@ class TaxiAgent(TaxiDriver):
             if len(average_moves) > episodesPerTest:
                 average_moves.pop(0)
 
-            avg_reward_value = sum(average_reward) / len(average_reward)
-            avg_reward_value = round(avg_reward_value, 1)
-
-            avg_moves = sum(average_moves) / len(average_moves)
-            avg_moves = round(avg_moves, 1)
-
             isBetter = False
 
             if final_reward > best_reward:
@@ -381,49 +478,33 @@ class TaxiAgent(TaxiDriver):
                 isBetter = True
 
                 # self.learning_rate = min(self.initial_learning_rate, self.learning_rate + self.learning_rate * (final_reward - best_reward) / 100)
-                self.learning_rate = self.initial_learning_rate
+                # self.learning_rate = self.initial_learning_rate
 
                 best_reward = final_reward
-
-            # Print episode details
-            # If finished color green, else color red
-            
-            color = Fore.WHITE
-            if (self.goal_finished):
-                color = Fore.YELLOW
-                if (isBetter):
-                    color = Fore.GREEN
-            else:
-                color = Fore.RED
-                if (isBetter):
-                    color = Fore.MAGENTA
             
             if (isBetter):
-                print(color + f"Episode: {episode}, Moves = {self.current_turn}, Final Reward = {final_reward}, Epsilon = {self.epsilon}, Learning Rate = {self.learning_rate}")
+                print(f"Episode: {episode}, Moves = {self.current_turn}, Final Reward = {final_reward}, Epsilon = {self.epsilon}, Learning Rate = {self.learning_rate}")
 
             if episode % episodesPerTest == 0:
 
-                test_rewards, test_moves, currentGrid = self.run_map(map, training=False, storeResults=False)
-                difError = abs(a_moves - test_moves) - 1
+                avg_reward_value = sum(average_reward) / len(average_reward)
+                avg_reward_value = round(avg_reward_value, 1)
 
-                movesToGoal = 0
-                # If difError != 0, then we are not at the goal
-                if difError != 0:
-                    aCurrentPath = find_path(currentGrid)
-                    movesToGoal = len(aCurrentPath)
+                avg_moves = sum(average_moves) / len(average_moves)
+                avg_moves = round(avg_moves, 1)
                 
                 # Add df row
                 # df = pd.concat([df, pd.DataFrame({'episode': [episode], 'avg_rewards': [avg_reward_value], 'test_rewards': [test_rewards], 'test_moves': [test_moves], 'difError': [difError], 'movesToGoal': [movesToGoal]})])
-                df.loc[len(df.index)] = [episode, avg_reward_value, test_rewards, test_moves, difError, movesToGoal]
+                df.loc[len(df.index)] = [episode, avg_reward_value, avg_moves]
                 # display(df)
 
-                print("Epoch: ", episode)
+                print(f"Epoch: {episode}, average moves: {avg_moves}, average reward: {avg_reward_value}")
 
         return df
 
 
 def init_dataframe():
-    return pd.DataFrame(columns=['episode', 'avg_rewards', 'test_rewards', 'test_moves', 'difError', 'movesToGoal'])
+    return pd.DataFrame(columns=['episode', 'avg_rewards', 'avg_moves'])
 
 def print_grid(grid):
     for col in grid[0]:
@@ -655,6 +736,7 @@ class GridViewer:
             q_values_text = beautify_q_values(self.q_values_list[self.index])
         else:
             q_values_text = "No Q-values available for this state."
+            q_values_text = beautify_q_values(self.q_values_list[self.index])
 
         self.q_values_label.config(text=q_values_text)
 
@@ -749,14 +831,14 @@ def train_agent(agent, map, agentName='Agent'):
     print(f"Training {agentName}...")
     start_time_train = time.time()
 
-    train_dataframe = agent.train_agent(map, NUM_EPISODES, 10)
+    train_dataframe = agent.train_agent(map, NUM_EPISODES)
 
     end_time_train = time.time()
     print("Training time: " + str(end_time_train - start_time_train))
 
     return train_dataframe
 
-def display_test(agent, rewards, grids, moves, agentName='Agent'):
+def display_test(agent, rewards, grids, moves, agentName='Agent', path=''):
     qValues = []
 
     for i in range(len(grids)):
@@ -772,7 +854,7 @@ def display_test(agent, rewards, grids, moves, agentName='Agent'):
 
     # Create a unique folder for this test run
     test_run_id = str(uuid.uuid4())
-    folder_path = f'testrun-{agentName}-{test_run_id}'
+    folder_path = f'{path}/agent_runs/testrun-{agentName}-{test_run_id}'
     print("Test run id: ", test_run_id)
 
     image_paths = save_grids_as_images(grids, folder_path)
@@ -783,47 +865,70 @@ def display_test(agent, rewards, grids, moves, agentName='Agent'):
     app = GridViewer(root, image_paths, qValues)
     root.mainloop()
 
+def load_Q_table(agentName='Agent'):
+    if os.path.exists(agentName):
+        with open(agentName, 'rb') as f:
+            return pickle.load(f)
+    else:
+        return {}
 
-# Running
+def save_Q_table(agent, agentName='Agent'):
+    with open(agentName, 'wb') as f:
+        pickle.dump(agent.qtable, f)
 
 
-# Pickle file for Q1
-agent1_save = "AgentDirectional.pickle"
+def plot_avg_metric(df, metric, window, label, color, log=False):
+    episodes = df['episode']
+    y = df[metric]
+    
+    average_y = []
+    for ind in range(len(y) - window + 1):
+        average_y.append(np.mean(y[ind:ind+window]))
+    
+    for ind in range(window - 1):
+        average_y.insert(0, np.nan)
+    
+    # Check if log scale is requested
+    if log:
+        plt.yscale('log')
 
-# Agents (with directional/quadrant state and limit/no limit Q-table)
-agent_dir_limit_save = "AgentDirectional_Limit.pickle"
-agent_quad_limit_save = "AgentQuadrant_Limit.pickle"
-agent_dir_no_limit_save = "AgentDirectional_NoLimit.pickle"
-agent_quad_no_limit_save = "AgentQuadrant_NoLimit.pickle"
-
-# Define constants
-MAX_MOVES = 100
-NUM_EPISODES = 20000
-DISCOUNT_FACTOR = 0.999
-MAX_Q_VALUE = 20
-MIN_Q_VALUE = -1
-ACTIONS = ['up', 'right', 'down', 'left']
-
-# Graph constants
-GROUP_BY = int(NUM_EPISODES/5)
+    plt.plot(episodes, average_y, color=color, label=label)
 
 # Maps
 
 MAP_1 = [
     ['1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1'],
-    ['1', '0', '0', '0', '0', '0', '1', '0', '0', '0', '1', '0', '0', 'G', '1'],
-    ['1', '0', '0', '1', '0', '0', '0', '0', '1', '0', '0', '0', '1', '0', '1'],
-    ['1', '0', '0', '1', '0', '0', '1', '1', '1', '1', '1', '1', '1', '0', '1'],
-    ['1', '0', '0', '1', '0', '0', '0', '0', '0', '0', '0', '0', '1', '0', '1'],
-    ['1', '0', '0', '1', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0', '1'],
-    ['1', '0', '0', '0', '0', 'T', '0', '0', '0', '1', '0', '0', '0', '0', '1'],
+    ['1', '0', '0', '0', '0', '1', '0', '0', '0', '0', '1', '0', '0', 'G', '1'],
+    ['1', '0', '0', '0', '0', '0', '0', '0', '1', '0', '0', '0', '1', '0', '1'],
+    ['1', '1', '1', '0', '0', '1', '1', '1', '1', '1', '1', '1', '1', '0', '1'],
+    ['1', '1', '0', '0', '0', '1', '0', '0', '0', '0', '0', '0', '1', '0', '1'],
+    ['1', '0', '0', '0', '0', '1', '0', '0', '0', '0', '0', '0', '0', '0', '1'],
     ['1', '0', '0', '0', '0', '0', '0', '0', '0', '1', '0', '0', '0', '0', '1'],
-    ['1', '0', '0', '0', '0', '0', '0', '0', '0', '1', '1', '0', '0', '0', '1'],
-    ['1', '1', '1', '1', '0', '0', '0', '0', '0', '0', '1', '1', '0', '0', '1'],
-    ['1', '0', '0', '1', '0', '0', '0', '0', '0', '0', '0', '1', '0', '0', '1'],
-    ['1', '0', '0', '1', '1', '1', '0', '0', '0', '0', '0', '1', '1', '0', '1'],
-    ['1', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0', '1', '1', '1'],
-    ['1', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0', '1'],
+    ['1', '0', '0', '0', '0', '0', '0', '0', '0', '1', '0', '0', '0', '0', '1'],
+    ['1', '0', '0', '0', '0', '0', '0', '0', '0', '1', '0', '0', '0', '0', '1'],
+    ['1', '1', '1', '1', '0', '0', '0', '0', '0', '1', '1', '0', '0', '0', '1'],
+    ['1', '0', '0', '1', '0', '0', '0', '0', '0', '0', '1', '0', '0', '0', '1'],
+    ['1', '0', '0', '1', '1', '1', '0', '0', '0', '1', '1', '0', '0', '0', '1'],
+    ['1', '0', '0', '0', 'T', '0', '0', '0', '0', '0', '1', '0', '0', '0', '1'],
+    ['1', '0', '0', '0', '0', '0', '0', '0', '0', '0', '1', '1', '0', '0', '1'],
+    ['1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1']
+]
+
+MAP_1_ADVANCED = [
+    ['1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1'],
+    ['1', '0', '0', '0', '0', '1', '0', '0', '0', '0', '1', '0', '0', 'G', '1'],
+    ['1', '0', '0', '0', '0', '0', '0', '0', '1', '0', '0', '0', '1', '0', '1'],
+    ['1', '1', '1', '0', '0', '1', '1', '1', '1', '1', '1', '1', '1', '0', '1'],
+    ['1', '1', '0', '0', '0', '1', '0', '0', '0', '0', '0', '0', '1', '0', '1'],
+    ['1', '0', '0', '0', '0', '1', '0', '0', '0', '0', '0', '0', '1', '0', '1'],
+    ['1', '0', '0', '0', '0', '0', '0', '0', '0', '1', '0', '0', '1', '0', '1'],
+    ['1', '0', '0', '0', '0', '0', '0', '0', '0', '1', '0', '0', '1', '0', '1'],
+    ['1', '0', '0', '0', '0', '0', '0', '0', '0', '1', '0', '0', '1', '0', '1'],
+    ['1', '1', '1', '1', '0', '0', '0', '0', '0', '1', '1', '0', '1', '0', '1'],
+    ['1', '0', '0', '1', '0', '0', '0', '0', '0', '0', '1', '0', '1', '0', '1'],
+    ['1', '0', '0', '1', '1', '1', '0', '0', '0', '1', '1', '0', '0', '0', '1'],
+    ['1', '0', '0', '0', 'T', '0', '0', '0', '0', '0', '1', '0', '0', '0', '1'],
+    ['1', '0', '0', '0', '0', '0', '0', '0', '0', '0', '1', '1', '0', '0', '1'],
     ['1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1']
 ]
 
@@ -845,107 +950,98 @@ MAP_2 = [
     ['1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1']
 ]
 
-MAP_1_ADVANCED  = [
+MAP_2 = [
     ['1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1'],
-    ['1', '0', 'T', '0', '0', '0', '0', '1', '0', '0', '0', '0', '0', '0', '1'],
-    ['1', '0', '0', '1', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0', '1'],
-    ['1', '0', '0', '1', '0', '0', '1', '1', '1', '1', '1', '1', '1', '0', '1'],
-    ['1', '0', '0', '1', '0', '0', '0', '0', '0', '0', '0', '0', '1', '1', '1'],
-    ['1', '0', '0', '1', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0', '1'],
-    ['1', '0', '0', '0', '0', '0', '0', '0', '0', '1', '0', '0', '0', '0', '1'],
-    ['1', '0', '0', '0', '0', '0', '0', '0', '0', '1', '0', '0', '0', '0', '1'],
-    ['1', '0', '0', '0', '0', '0', '0', '0', '0', '1', '1', '0', '0', '0', '1'],
-    ['1', '1', '1', '1', '0', '0', '0', '0', '0', '0', '1', '1', '0', '0', '1'],
-    ['1', '0', '0', '1', '0', '0', '0', '0', '0', '0', '0', '1', '0', '0', '1'],
-    ['1', '0', '0', '1', '1', '1', '0', '0', '0', '0', '0', '1', '1', '0', '1'],
-    ['1', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0', '1', '1', '1'],
     ['1', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0', '1'],
-    ['1', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0', '1'],
-    ['1', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0', '1'],
-    ['1', '0', '0', '0', '0', '0', '0', '1', '0', '0', '0', '0', '0', '0', '1'],
-    ['1', '0', '0', '1', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0', '1'],
-    ['1', '0', '0', '1', '0', '0', '1', '1', '1', '1', '1', '1', '1', '0', '1'],
-    ['1', '0', '0', '1', '0', '0', '0', '0', '0', '0', '0', '0', '1', '1', '1'],
-    ['1', '0', '0', '1', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0', '1'],
-    ['1', '0', '0', '0', '0', '0', 'G', '0', '0', '1', '0', '0', '0', '0', '1'],
     ['1', '0', '0', '0', '0', '0', '0', '0', '0', '1', '0', '0', '0', '0', '1'],
-    ['1', '0', '0', '0', '0', '0', '0', '0', '0', '1', '1', '0', '0', '0', '1'],
-    ['1', '1', '1', '1', '0', '0', '0', '0', '0', '0', '1', '1', '0', '0', '1'],
-    ['1', '0', '0', '1', '0', '0', '0', '0', '0', '0', '0', '1', '0', '0', '1'],
-    ['1', '0', '0', '1', '1', '1', '0', '0', '0', '0', '0', '1', '1', '0', '1'],
-    ['1', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0', '1', '1', '1'],
+    ['1', '0', '0', '1', '1', '0', '0', '0', '1', '1', '1', '1', '1', '0', '1'],
+    ['1', '0', '0', '1', '0', '0', '0', '0', '0', '0', '0', '0', '1', '0', '1'],
+    ['1', '0', '0', '1', '1', '0', '0', '0', '0', '0', '0', '0', '1', '0', '1'],
+    ['1', '0', '0', '0', '1', '1', '0', '0', '1', '1', '0', '0', '1', '0', '1'],
+    ['1', '0', '0', '0', '0', '0', '0', '0', '0', '1', '0', '0', '1', '0', '1'],
+    ['1', '0', '0', '0', '0', '0', '0', '0', '0', '1', '0', '0', '1', '0', '1'],
+    ['1', '1', '1', '1', '0', '0', '0', '0', '0', '1', '0', '0', '0', '0', '1'],
+    ['1', 'G', '0', '1', '0', '0', '0', '0', '0', '1', '1', '0', '0', '0', '1'],
+    ['1', '0', '0', '1', '1', '0', '0', '0', '0', '0', '1', '1', '1', '0', '1'],
+    ['1', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0', '1', '0', '1'],
+    ['1', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0', '1', 'T', '1'],
+    ['1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1']
+]
+
+MAP_2_ADVANCED = [
+    ['1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1'],
+    ['1', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0', '1'],
+    ['1', '0', '0', '0', '0', '0', '0', '0', '0', '1', '0', '0', '0', '0', '1'],
+    ['1', '0', '0', '1', '1', '0', '0', '0', '1', '1', '1', '1', '1', '0', '1'],
+    ['1', '0', '0', '1', '0', '0', '0', '0', '0', '0', '0', '0', '1', '0', '1'],
+    ['1', '0', '0', '1', '1', '0', '0', '0', '0', '0', '0', '0', '1', '0', '1'],
+    ['1', '0', '0', '0', '1', '1', '1', '1', '1', '1', '0', '0', '1', '0', '1'],
+    ['1', '0', '0', '0', '0', '0', '0', '0', '0', '1', '0', '0', '1', '0', '1'],
+    ['1', '0', '0', '0', '0', '0', '0', '0', '0', '1', '0', '0', '1', '0', '1'],
+    ['1', '1', '1', '1', '0', '0', '0', '0', '0', '1', '0', '0', '0', '0', '1'],
+    ['1', 'G', '0', '1', '0', '0', '0', '0', '0', '1', '1', '0', '0', '0', '1'],
+    ['1', '0', '0', '1', '1', '0', '0', '0', '0', '0', '1', '1', '1', '0', '1'],
+    ['1', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0', '1', '0', '1'],
+    ['1', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0', '1', 'T', '1'],
+    ['1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1']
+]
+
+MAP_3 = [
+    ['1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1'],
+    ['1', '0', '0', '0', '0', '0', '1', '0', '0', '0', '0', '0', '0', '0', '1'],
+    ['1', '0', '0', '1', '1', '0', '0', '0', '1', '0', '0', '0', '1', '1', '1'],
+    ['1', '0', '1', '1', '0', '0', '0', '0', '1', '1', '1', '1', '1', '0', '1'],
+    ['1', '0', '0', '1', '0', '0', '0', '0', '1', '0', '0', '0', '1', '0', '1'],
+    ['1', '0', '0', '1', '1', '0', '0', '0', '1', 'G', '0', '0', '1', '0', '1'],
+    ['1', '0', 'T', '0', '0', '0', '0', '0', '1', '1', '0', '0', '1', '0', '1'],
+    ['1', '0', '0', '0', '0', '0', '0', '0', '0', '1', '0', '0', '1', '0', '1'],
+    ['1', '0', '0', '0', '0', '0', '0', '0', '0', '1', '0', '0', '1', '0', '1'],
+    ['1', '1', '1', '1', '0', '0', '0', '0', '0', '1', '0', '0', '0', '0', '1'],
+    ['1', '0', '0', '1', '0', '0', '0', '0', '0', '1', '1', '0', '0', '0', '1'],
+    ['1', '0', '0', '1', '1', '0', '0', '0', '0', '0', '1', '1', '1', '0', '1'],
+    ['1', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0', '1', '0', '0', '1'],
     ['1', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0', '1'],
     ['1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1']
 ]
 
 
-MAPS_BASE = [MAP_1, MAP_1_ADVANCED, MAP_2]
+MAPS_BASE = [MAP_1, MAP_1_ADVANCED, MAP_2, MAP_2_ADVANCED]
 
-# taxiPlayer = TaxiDriver()
-# taxiPlayer.play(MAP_1)
+# Define constants
+MAX_MOVES = 100
+NUM_EPISODES = 5000
+DISCOUNT_FACTOR = 0.99
+MAX_Q_VALUE = 200
+MIN_Q_VALUE = -1
+ACTIONS = ['up', 'right', 'down', 'left']
+HARD_LIMIT = 10000
+
+# Graph constants
+GROUP_BY = int(NUM_EPISODES/5)
+
+agentName = 'ImmediateSoftmaxNoLimit1'
+agentQTable = 'ImmediateSoftmaxNoLimit1'
+mapName = 'Map1'
+mapIndex = 0
+
+# Load Q table
+qTable = load_Q_table(agentQTable + ".pickle")
+agent = TaxiAgent(qTable, reward_type='immediate', exploration='softmax', limitQ = False)
+# agent = TaxiAgent(qTable, reward_type='immediate', exploration='softmax', limitQ = True)
+# agent = TaxiAgent(qTable, reward_type='immediate', exploration='greedy', limitQ = False)
+# agent = TaxiAgent(qTable, reward_type='immediate', exploration='greedy', limitQ = True)
+
+# agent = TaxiAgent(qTable, reward_type='delayed', exploration='softmax', limitQ = False)
+# agent = TaxiAgent(qTable, reward_type='delayed', exploration='softmax', limitQ = True)
+# agent = TaxiAgent(qTable, reward_type='delayed', exploration='greedy', limitQ = False)
+# agent = TaxiAgent(qTable, reward_type='delayed', exploration='greedy', limitQ = True)
 
 # Training
-# start_time_train = time.time()
+df_training = train_agent(agent, MAPS_BASE[mapIndex], agentName)
 
-# Load pickle if it exists
-# if os.path.exists(agent1_save):
-#     with open(agent1_save, 'rb') as f:
-#         qTable = pickle.load(f)
-# else:
-#     qTable = {}
+# Testing
+rewards, grids, _ = agent.run_map(MAPS_BASE[mapIndex], training=False, storeResults=True)
+display_test(agent, rewards, grids, len(grids), agentName, 'FinalResults/Map1')
 
-# taxi1 = TaxiAgent(qTable)  # RL Agent
-# taxi1.train_agent(MAPS_BASE[1], NUM_EPISODES)
-
-# Agents
-agent_dir_limit = TaxiAgent({}, 'alt', True)  # RL Agent
-agent_dir_no_limit = TaxiAgent({}, 'alt', False)
-agent_quad_limit = TaxiAgent({}, 'quadrant', True)
-agent_quad_no_limit = TaxiAgent({}, 'quadrant', False)
-
-
-train_df = train_agent(agent_dir_limit, MAPS_BASE[0], 'Agent Directional with Q Limit')
-print("Training DF")
-display(train_df)
-
-rewards, grids, _ = agent_dir_limit.run_map(MAPS_BASE[0], training=False, storeResults=True)
-display_test(agent_dir_limit, rewards, grids, len(grids), 'Agent Directional with Q Limit')
-
-# Create a plot based on episodes and avg_rewards
-
-# Assuming train_df is already defined and has the necessary columns
-episodes = train_df['episode']
-
-# Custom settings for a similar visual look
-marker_style = dict(marker='.', markersize=5, linestyle='-', linewidth=1.5)
-
-window_size = 100  # You can adjust this size to make the plot smoother or less smooth
-
-# Calculate the moving average of the average rewards
-smoothed_rewards = train_df['test_rewards'].rolling(window=window_size).mean()
-
-# Plot 1: episodes vs test_rewards
-plt.figure(figsize=(12, 6))
-plt.plot(episodes, train_df['test_rewards'], **marker_style)
-plt.xlabel('Episode')
-plt.ylabel('Average Rewards')
-plt.title('Episodes vs Average Rewards')
-plt.grid(True)
-plt.show()
-
-# Plot 2: episodes vs difError
-plt.figure(figsize=(12, 6))
-plt.plot(episodes, train_df['difError'], **marker_style)
-plt.xlabel('Episode')
-plt.ylabel('DifError')
-plt.title('Episodes vs DifError')
-plt.grid(True)
-plt.show()
-
-
-# end_time_train = time.time()
-# print("Training time: " + str(end_time_train - start_time_train))
-
-# # Save qTable
-# with open(agent1_save, 'wb') as f:
-#     pickle.dump(agent_dir_limit.qtable, f)
+# Save csv
+df_training.to_csv('FinalResults/' + mapName + '/csv/' + agentName + '.csv')
