@@ -22,6 +22,7 @@ class TaxiDriver:
         self.goal_finished = False
         self.current_turn = 0
         self.c_picked = -1
+        self.hit_wall = False
 
     def restart_round(self, starting_location, grid):
         self.position = starting_location
@@ -29,6 +30,7 @@ class TaxiDriver:
         self.goal_finished = False
         self.current_turn = 0
         self.c_picked = -1
+        self.hit_wall = False
 
     # If the new position the taxi moves has a goal and the taxi has a customer, finish
     def drop_passenger(self):
@@ -36,7 +38,6 @@ class TaxiDriver:
 
     def move(self, direction):
         old_pos_value = '0'
-        # old_pos_value = get_pos_value(self.grid, self.position)
         new_pos = None
         if direction == 'up':
             new_pos = [self.position[0] - 1, self.position[1]]
@@ -52,20 +53,23 @@ class TaxiDriver:
             return True
         new_pos_value = get_pos_value(self.grid, new_pos)
 
-        if new_pos_value != '1':
-            self.pos_goal = False
+        if new_pos_value == '1':
+            # Mark the hit location with 'h' before ending the game
+            add_value_to_pos(self.grid, new_pos, 'H')
+            self.goal_finished = True
+            self.hit_wall = True
+            return False  # End the game
 
         if new_pos_value == 'G':
             self.drop_passenger()
 
-        if new_pos_value != '1':
-            # Update previous loc value
-            add_value_to_pos(self.grid, self.position, old_pos_value)
-            self.position = new_pos
-            # Update current loc value
-            add_value_to_pos(self.grid, self.position, 'T')
+        # Update previous loc value
+        add_value_to_pos(self.grid, self.position, old_pos_value)
+        self.position = new_pos
+        # Update current loc value
+        add_value_to_pos(self.grid, self.position, 'T')
 
-        return get_pos_value(self.grid, new_pos) != '1'
+        return True
 
     def choice(self):
         self.current_turn += 1
@@ -74,10 +78,17 @@ class TaxiDriver:
         print_grid(self.grid)
         choice = input(f"Choose an action (up/right/down/left): ").lower()
         if not self.move(choice):
-            return True
+            return False  # End the game if move returns False
 
         print_grid(self.grid)
         return True
+    
+    def check_if_wall_hit(self):
+        # Check if H is in the map
+        wall_hit = any('W' in row for row in self.grid)
+
+        return wall_hit
+
 
     def play(self, grid, qtable=None):
         current_grid = copy.deepcopy(grid)
@@ -99,13 +110,16 @@ class TaxiDriver:
                 print(qtable[state])
             result = self.choice()
 
-            if not result:
+            if not result or self.check_if_wall_hit():
+                print_grid(current_grid)
                 break
+
+
 
 class TaxiAgent(TaxiDriver):
 
-    def __init__(self, qtable={}, reward_type='delayed', exploration='greedy', limitQ = True, state_type = 'alt', initial_epsilon=0.3, 
-                 initial_learning_rate=0.1, min_learning_rate=0.0001, learning_rate_decay=0.99995):
+    def __init__(self, qtable={}, reward_type='delayed', exploration='greedy', limitQ = True, state_type = 'alt', initial_epsilon=0.3, min_epsilon=0.01,
+                 initial_learning_rate=0.01, min_learning_rate=0.001, learning_rate_decay=0.999995):
         super().__init__()
         self.transitions = []
         self.episode_rewards = 0
@@ -114,6 +128,7 @@ class TaxiAgent(TaxiDriver):
         self.initial_epsilon = initial_epsilon
         self.initial_learning_rate = initial_learning_rate
         self.epsilon = initial_epsilon
+        self.min_epsilon = min_epsilon
         self.learning_rate = initial_learning_rate
         self.min_learning_rate = min_learning_rate
         self.learning_rate_decay = learning_rate_decay
@@ -134,11 +149,8 @@ class TaxiAgent(TaxiDriver):
         self.transitions = []
         self.episode += 1
 
-        # Adjust learning rate based on performance
-        if self.episode_rewards > self.best_reward:
-            self.best_reward = self.episode_rewards
-        else:
-            self.learning_rate = max(self.min_learning_rate, self.learning_rate * self.learning_rate_decay)
+        self.learning_rate = max(self.min_learning_rate, self.learning_rate * self.learning_rate_decay)
+        self.epsilon = max(self.min_epsilon, self.initial_epsilon * self.learning_rate_decay ** self.episode)
         
         self.recent_rewards.append(self.episode_rewards)
 
@@ -148,7 +160,7 @@ class TaxiAgent(TaxiDriver):
     def calculate_discounted_rewards_and_update_q_table(self, final_reward):
         cumulative_reward = final_reward
 
-        # Iterate through the transitions in reverse order
+        # Iterate through the transitions
         for state, action in (self.transitions):
             currentAction = action
             current_q_value = self.qtable[state][action]
@@ -236,8 +248,13 @@ class TaxiAgent(TaxiDriver):
 
         # If goal is not on the grid, add +20 to the reward
         if not goal_exists:
-            reward += 10
-            reward += (MAX_MOVES - self.current_turn) ** 2/1000
+            # reward += 100
+            # reward += (MAX_MOVES - self.current_turn) ** 3/1000
+            reward += 20 * (1.1 ** (MAX_MOVES  - self.current_turn))
+        
+        # If hit a wall or max turns has passed, subtract 0.1 reward
+        if self.hit_wall:
+            reward -= 0.1
                
         # If goal exists give reward based on distance (closer is better)
         if goal_exists:
@@ -245,14 +262,14 @@ class TaxiAgent(TaxiDriver):
             agent_pos = find_pos_of_value(grid, 'T')
             distance = abs(goal_pos[0] - agent_pos[0]) + abs(goal_pos[1] - agent_pos[1])
             # reward += (len(grid)*2 - distance) * math.sqrt(len(grid))
-            reward += ((len(grid)*2 - distance)*4/10)
+            reward += 10 / (distance ** 4)
 
             # # If max turnes has passed
             # if self.current_turn >= MAX_MOVES:
             #     reward -= 0.01
 
         # Subtract the number of turns taken by the agent
-        reward -= self.current_turn / 1000
+        reward -= self.current_turn / 10000
 
         return reward
     
@@ -360,7 +377,7 @@ class TaxiAgent(TaxiDriver):
 
             if self.reward_type == 'immediate':
                 action_reward = self.calculate_final_reward(current_grid)
-                action_reward += self.calculate_immediate_reward(last_grid, current_grid)
+                # action_reward += self.calculate_immediate_reward(last_grid, current_grid)
                 sum_immediate_reward += action_reward
                 # print(f"Last Grid:")
                 # print_grid(last_grid)
@@ -383,7 +400,7 @@ class TaxiAgent(TaxiDriver):
         if training and self.reward_type == 'delayed':
             self.calculate_discounted_rewards_and_update_q_table(final_reward)
         
-        if training and self.reward_type == 'immediate' and result:
+        if training and self.reward_type == 'immediate' and result and not(self.hit_wall) and self.current_turn < MAX_MOVES:
             state = grid_qtable_alt(current_grid)
             try:
                 self.update_q_values(state, self.currentaction, self.qtable[state][self.currentaction] + 10 * DISCOUNT_FACTOR + ((MAX_MOVES - self.current_turn)**2)/1000 * DISCOUNT_FACTOR)
@@ -404,6 +421,7 @@ class TaxiAgent(TaxiDriver):
         best_reward = float('-inf')
         average_reward = []
         average_moves = []
+        wins = []
 
         episodesPerTest = num_episodes/100
 
@@ -421,6 +439,14 @@ class TaxiAgent(TaxiDriver):
             average_moves.append(self.current_turn)
             if len(average_moves) > episodesPerTest:
                 average_moves.pop(0)
+            
+            # Check if goal exists in grid
+            if self.goal_finished and not(self.hit_wall):
+                wins.append(1)
+            else:
+                wins.append(0)
+            if len(wins) > episodesPerTest:
+                wins.pop(0)
 
             isBetter = False
 
@@ -434,6 +460,7 @@ class TaxiAgent(TaxiDriver):
                 # self.learning_rate = self.initial_learning_rate
 
                 best_reward = final_reward
+                final_reward = round(final_reward, 1)
             
             if (isBetter):
                 print(f"Episode: {episode}, Moves = {self.current_turn}, Final Reward = {final_reward}, Epsilon = {self.epsilon}, Learning Rate = {self.learning_rate}")
@@ -445,19 +472,36 @@ class TaxiAgent(TaxiDriver):
 
                 avg_moves = sum(average_moves) / len(average_moves)
                 avg_moves = round(avg_moves, 1)
+
+                avg_wins = sum(wins) / len(wins)
+                avg_wins = round(avg_wins, 1)
                 
                 # Add df row
                 # df = pd.concat([df, pd.DataFrame({'episode': [episode], 'avg_rewards': [avg_reward_value], 'test_rewards': [test_rewards], 'test_moves': [test_moves], 'difError': [difError], 'movesToGoal': [movesToGoal]})])
-                df.loc[len(df.index)] = [episode, avg_reward_value, avg_moves]
+                # df.loc[len(df.index)] = [episode, avg_reward_value, avg_moves]
                 # display(df)
 
-                print(f"Epoch: {episode}, average moves: {avg_moves}, average reward: {avg_reward_value}")
+                # Test run
+                rewards, moves, last_grid =self.run_map(map, training=False)
+                rewards = round(rewards, 1)
+
+                # Check if goal exists in grid
+                if self.goal_finished and not(self.hit_wall):
+                    win = True
+                else:
+                    win = False
+
+                # print(f"Episode: {episode}, average moves: {avg_moves}, average reward: {avg_reward_value}, wins: {avg_wins}")
+                rounded_learning_rate = round(self.learning_rate, 3)
+                rounded_epsilon = round(self.epsilon, 3)
+                print(f"Episode: {episode}, rewards = {rewards}, moves = {moves}, won = {win}, learning rate = {rounded_learning_rate}, epsilon = {rounded_epsilon}")
+                df.loc[len(df.index)] = [episode, rewards, moves]
 
         return df
 
 
 def init_dataframe():
-    return pd.DataFrame(columns=['episode', 'avg_rewards', 'avg_moves'])
+    return pd.DataFrame(columns=['episode', 'rewards', 'moves'])
 
 def print_grid(grid):
     for col in grid[0]:
@@ -612,7 +656,8 @@ def grid_to_image(grid, cell_size=20):
         '1': (0, 0, 0),       # Wall - black
         '0': (255, 255, 255), # Empty space - white
         'T': (255, 255, 0),   # Taxi - yellow
-        'G': (0, 255, 0)      # Goal - green
+        'G': (0, 255, 0),      # Goal - green
+        'H': (255, 0, 0)      # Hit - red
     }
 
     # Calculate image size
@@ -997,8 +1042,8 @@ MAP_2 = [
 MAPS_BASE = [MAP_1, MAP_1_ADVANCED, MAP_2, MAP_2_ADVANCED]
 
 # Define constants
-MAX_MOVES = 150
-NUM_EPISODES = 1000
+MAX_MOVES = 100
+NUM_EPISODES = 500000
 DISCOUNT_FACTOR = 0.99
 MAX_Q_VALUE = 200
 MIN_Q_VALUE = -1
@@ -1008,8 +1053,8 @@ HARD_LIMIT = 10000
 # Graph constants
 GROUP_BY = int(NUM_EPISODES/5)
 
-agentName = 'ImGred1'
-agentQTable = '1'
+agentName = 'DelayedGreedy'
+agentQTable = 'bro2'
 mapName = 'Map2'
 mapIndex = 2
 
@@ -1017,12 +1062,12 @@ mapIndex = 2
 qTable = load_Q_table(agentQTable + ".pickle")
 # agent = TaxiAgent(qTable, reward_type='immediate', exploration='softmax', limitQ = False)
 # agent = TaxiAgent(qTable, reward_type='immediate', exploration='softmax', limitQ = True)
-agent = TaxiAgent(qTable, reward_type='immediate', exploration='greedy', limitQ = False)
+# agent = TaxiAgent(qTable, reward_type='immediate', exploration='greedy', limitQ = False)
 # agent = TaxiAgent(qTable, reward_type='immediate', exploration='greedy', limitQ = True)
 
 # agent = TaxiAgent(qTable, reward_type='delayed', exploration='softmax', limitQ = False)
 # agent = TaxiAgent(qTable, reward_type='delayed', exploration='softmax', limitQ = True)
-# agent = TaxiAgent(qTable, reward_type='delayed', exploration='greedy', limitQ = False)
+agent = TaxiAgent(qTable, reward_type='delayed', exploration='greedy', limitQ = False)
 # agent = TaxiAgent(qTable, reward_type='delayed', exploration='greedy', limitQ = True)
 
 # Training
