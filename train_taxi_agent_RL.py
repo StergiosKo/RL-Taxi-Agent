@@ -3,7 +3,6 @@ import pickle
 import matplotlib.pyplot as plt
 import numpy as np
 import copy
-from colorama import Fore
 import math
 import os
 import uuid
