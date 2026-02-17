@@ -3,6 +3,7 @@ import pickle
 import matplotlib.pyplot as plt
 import numpy as np
 import copy
+from colorama import Fore
 import math
 import os
 import uuid
@@ -122,7 +123,7 @@ class TaxiDriver:
 
 class TaxiAgent(TaxiDriver):
 
-    def __init__(self, qtable={}, reward_type='delayed', exploration='greedy', limitQ = True, state_type = 'alt', initial_epsilon=0.3, min_epsilon=0.01, epsilon_decay=0.99995,
+    def __init__(self, qtable={}, reward_type='delayed', exploration='greedy', punished=False, limitQ = True, state_type = 'alt', initial_epsilon=0.3, min_epsilon=0.01, epsilon_decay=0.99995,
                  initial_learning_rate=0.01, min_learning_rate=0.001, learning_rate_decay=0.999995):
         super().__init__()
         self.transitions = []
@@ -148,6 +149,7 @@ class TaxiAgent(TaxiDriver):
         self.exploration = exploration
         self.currentaction = None
         self.immediate_rewards_turns = 0
+        self.punished = punished
 
     def restart_round(self, starting_location, grid):
         super().restart_round(starting_location, grid)
@@ -239,6 +241,7 @@ class TaxiAgent(TaxiDriver):
         prev_customer_count = sum(x.count('C') for x in previous_grid)
         new_customer_count = sum(x.count('C') for x in current_grid)
 
+        # For agents playing in maps with customers
         if new_customer_count < prev_customer_count:
             reward += 2
             # print("got customer")
@@ -256,8 +259,9 @@ class TaxiAgent(TaxiDriver):
         #     reward += 50 - min(self.current_turn, 45)  # Immediate reward for reaching the goal
         #     return reward  # Return immediately since the goal was reached
         
-        # # Small penalty for unnecessary moves
-        reward -= 0.0001
+        # Small penalty for unnecessary moves
+        if (self.punished):
+            reward -= 0.0001
         
         
         return reward
@@ -765,31 +769,6 @@ def find_neighbors(node, grid):
                 neighbors.append(neighbor)
     return neighbors
 
-def a_star(grid, start, goal):
-    open_set = []
-    heappush(open_set, (0 + manhattan_distance(start, goal), 0, start))
-    came_from = {}
-    g_score = {node: float('inf') for node in np.ndindex(np.array(grid).shape)}
-    g_score[start] = 0
-
-    while open_set:
-        current = heappop(open_set)[2]
-        if current == goal:
-            path = []
-            while current in came_from:
-                path.append(current)
-                current = came_from[current]
-            return path[::-1]  # Reverse path
-
-        for neighbor in find_neighbors(current, grid):
-            tentative_g_score = g_score[current] + 1  # Assuming cost is 1 for each move
-            if tentative_g_score < g_score[neighbor]:
-                came_from[neighbor] = current
-                g_score[neighbor] = tentative_g_score
-                f_score = tentative_g_score + manhattan_distance(neighbor, goal)
-                heappush(open_set, (f_score, tentative_g_score, neighbor))
-    return []  # If no path is found
-
 def find_taxi_and_goal(grid):
     start = goal = None
     for i in range(len(grid)):
@@ -799,12 +778,6 @@ def find_taxi_and_goal(grid):
             elif grid[i][j] == 'G':
                 goal = (i, j)
     return start, goal
-
-def find_path(grid):
-    start, goal = find_taxi_and_goal(grid)
-    if not start or not goal:
-        return []
-    return a_star(grid, start, goal)
 
 
 def train_agent(agent, map, agentName='Agent', divider=100):
@@ -876,7 +849,7 @@ def plot_avg_metric(df, metric, window, label, color, log=False):
 
 # Maps
 
-MAP_CUSTOMER_MINI = [
+MAP_CUSTOMER_LARGE = [
     ['1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1'],
     ['1', 'G', '0', '0', '0', '0', '0', '0', '0', '0', '0', '1'],
     ['1', '0', '0', '0', '0', '0', '0', '0', '0', '1', '1', '1'],
@@ -891,7 +864,7 @@ MAP_CUSTOMER_MINI = [
     ['1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1']
 ]
 
-MAP_CUSTOMER_MINI_NO_C = [
+MAP_CUSTOMER_LARGE_NO_C = [
     ['1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1'],
     ['1', 'G', '0', '0', '0', '0', '0', '0', '0', '0', '0', '1'],
     ['1', '0', '0', '0', '0', '0', '0', '0', '0', '1', '1', '1'],
@@ -906,21 +879,7 @@ MAP_CUSTOMER_MINI_NO_C = [
     ['1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1']
 ]
 
-MAP_CUSTOMER_MINI_2 = [
-    ['1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1'],
-    ['1', '0', '0', '0', '0', '0', '0', '0', '0', '0', '1'],
-    ['1', '0', '0', '0', '0', 'G', '0', '0', '0', '0', '1'],
-    ['1', '0', 'C', '0', '0', '0', '0', '1', '0', '0', '1'],
-    ['1', '0', '0', '0', '0', '0', '0', '1', '0', '0', '1'],
-    ['1', '0', '0', '1', '1', '1', '1', '1', '0', '0', '1'],
-    ['1', '0', '0', '1', '0', '0', '0', '0', '0', '0', '1'],
-    ['1', '0', '0', '1', '0', '0', '0', '0', '0', '0', '1'],
-    ['1', '0', 'C', '0', '0', 'T', '0', '0', '0', '0', '1'],
-    ['1', '0', '0', '0', '0', '0', '0', '0', '0', '0', '1'],
-    ['1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1']
-]
-
-MAP_CUSTOMER_MINI_3 = [
+MAP_CUSTOMER_MINI = [
     ['1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1'],
     ['1', '0', '0', '0', '0', '0', '0', '0', '0', '0', '1'],
     ['1', '0', 'G', '0', '0', '0', '0', '1', '0', '0', '1'],
@@ -934,7 +893,7 @@ MAP_CUSTOMER_MINI_3 = [
     ['1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1']
 ]
 
-MAP_CUSTOMER_MINI_3_NO_C = [
+MAP_CUSTOMER_MINI_NO_C = [
     ['1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1'],
     ['1', '0', '0', '0', '0', '0', '0', '0', '0', '0', '1'],
     ['1', '0', 'G', '0', '0', '0', '0', '1', '0', '0', '1'],
@@ -949,39 +908,45 @@ MAP_CUSTOMER_MINI_3_NO_C = [
 ]
 
 
-MAPS_BASE = [MAP_CUSTOMER_MINI_3, MAP_CUSTOMER_MINI_3_NO_C, MAP_CUSTOMER_MINI, MAP_CUSTOMER_MINI_NO_C]
+MAPS_BASE = [MAP_CUSTOMER_LARGE, MAP_CUSTOMER_LARGE_NO_C, MAP_CUSTOMER_MINI, MAP_CUSTOMER_MINI_NO_C]
 
 # Define constants
 MAX_MOVES = 100
-NUM_EPISODES = 50000
+NUM_EPISODES = 12000
 DISCOUNT_FACTOR = 0.99
+# For Q-Limiter (Not implemented in final version)
 MAX_Q_VALUE = 200
 MIN_Q_VALUE = -1
 ACTIONS = ['up', 'right', 'down', 'left']
-HARD_LIMIT = 10000
 
-# Graph constants
-GROUP_BY = int(NUM_EPISODES/5)
-
-agentName = 'Monte Carlo Punish 50k Map 1 true'
+agentName = 'MonteCarloPunished'
 agentQTable = ''
-mapName = 'Map3'
-MAP_INDEX = 1
 
-# Load Q table
+# It needs folder name same as mapName
+mapName = 'Map3'
+# Map Indexes are: 0 = MAP_CUSTOMER_LARGE, 1 = MAP_CUSTOMER_LARGE_NO_C, 2 = MAP_CUSTOMER_MINI, 3 = MAP_CUSTOMER_MINI_NO_C
+MAP_INDEX = 2
+
+# Load Q table. If empty, a new one will be created
 qTable = load_Q_table(agentQTable + ".pickle")
 
-# agent = TaxiAgent(qTable, reward_type='delayed', exploration='softmax', limitQ = False)
+# Create Agent
+# Multiple lines for easier debugging on different agents
+# Thesis uses only immediate reward agents
+
 # agent = TaxiAgent(qTable, reward_type='delayed', exploration='greedy', limitQ = False, epsilon_decay=0.999995)
 
-# agent = TaxiAgent(qTable, reward_type='immediate', exploration='softmax', limitQ = False)
-agent = TaxiAgent(qTable, reward_type='immediate', exploration='greedy', initial_learning_rate=0.01, min_learning_rate=0.001, epsilon_decay=0.999995)
+# Remember to use appropriate maps for each agent. Punished agents don't use customers
+# agent = TaxiAgent(qTable, reward_type='immediate', exploration='softmax', punished=False, initial_learning_rate=0.01, min_learning_rate=0.001, epsilon_decay=0.999995)
+agent = TaxiAgent(qTable, reward_type='immediate', exploration='greedy', punished=False, initial_learning_rate=0.01, min_learning_rate=0.001, epsilon_decay=0.999995)
 
 # Training
+# Parameters: Agent, Map, Agent Name, Divider to display results (E.x. divider = 100 will display results every 100 episodes)
 df_training = train_agent(agent, MAPS_BASE[MAP_INDEX], agentName, 2000)
 
 # Save csv
-df_training.to_csv('FinalResults/Customers/Final/' + mapName + '/csv/' + agentName + '.csv')
+# Change path if needed
+# df_training.to_csv('FinalResults/Customers/Final/' + mapName + '/csv/' + agentName + '.csv')
 
 # Save Q table
 save_Q_table(agent, agentName + '.pickle')
@@ -990,5 +955,5 @@ save_Q_table(agent, agentName + '.pickle')
 rewards, grids, _ = agent.run_map(MAPS_BASE[MAP_INDEX], training=False, storeResults=True)
 display_test(agent, rewards, grids, len(grids), agentName, 'FinalResults/Customers/Final/' + mapName)
 
-taxiPlayer = TaxiDriver()
-taxiPlayer.play(MAPS_BASE[MAP_INDEX], agent.qtable)
+# taxiPlayer = TaxiDriver()
+# taxiPlayer.play(MAPS_BASE[MAP_INDEX], agent.qtable)
