@@ -62,18 +62,16 @@ These parameters are
 
 * The two maps (edit the two maps that are 2d string arrays, where '0' is an empty space, '1' a wall, 'T' the taxi agent and 'G' the goal)
 * Reward type (immediate or delayed)
+* If punishing technique should be used
 * Exploration type used (softmax or greedy)
 * Hyperparameters (learning rate, epsilon, discount factor)
-* Number of training episodes
+* Number of training episodes and display results
 
 There are premade agents on the python code, you are able to comment/uncomment which agents you want to use
 
 ```
-# agent = TaxiAgent(qTable, reward_type='delayed', exploration='softmax', limitQ = False)
-# agent = TaxiAgent(qTable, reward_type='delayed', exploration='greedy', limitQ = False, epsilon_decay=0.999995)
-
-# agent = TaxiAgent(qTable, reward_type='immediate', exploration='softmax', limitQ = False)
-# agent = TaxiAgent(qTable, reward_type='immediate', exploration='greedy', initial_learning_rate=0.01, min_learning_rate=0.001, epsilon_decay=0.999995)
+# agent = TaxiAgent(qTable, reward_type='immediate', exploration='softmax', punished=False, initial_learning_rate=0.01, min_learning_rate=0.001, epsilon_decay=0.999995)
+agent = TaxiAgent(qTable, reward_type='immediate', exploration='greedy', punished=False, initial_learning_rate=0.01, min_learning_rate=0.001, epsilon_decay=0.999995)
 ```
 
 The project also supports visualization of agent movement during evaluation to better understand learned policies.
